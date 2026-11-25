@@ -53,7 +53,17 @@ Status labels: **deployed** (runs in CI / locally), **designed** (written + stat
 ## D8. AWS network & cluster
 - 3 AZs; public subnets hold only ALB/NAT; nodes in private subnets; RDS in isolated DB subnets with no internet route. VPC flow logs on.
 - **EKS API endpoint:** public **but restricted by CIDR** and IAM, so GitHub-hosted runners can deploy. `prod_guardrails` forbids `0.0.0.0/0` in prod. **At scale:** private-only endpoint + self-hosted runners inside the VPC (or a pull-based GitOps tool like Argo CD, so CI needs no cluster access).
-- Node IMDSv2 with hop limit 1: pods cannot steal the node's IAM role. Pod Identity gives pods their own credentials instead.
+- **Node IMDSv2 with hop limit 1:** ordinary pods (on the pod network) can't get the node role's credentials. The IMDS token reply is limited to one network hop, and a pod sits one hop further away. Pods get their own credentials from Pod Identity instead.
+  - **It is a layer, not a boundary.** It does **not** stop:
+    - pods with `hostNetwork: true`, which share the node's network, so the reply reaches them;
+    - anything with node-level access: a privileged or `hostPath` pod, a container escape, SSM/SSH on the node.
+    
+    Some system add-ons legitimately run with hostNetwork (VPC CNI, kube-proxy, the Pod Identity agent), so they could read the node role.
+  - **What actually blocks those paths:**
+    - Pod Security **restricted** in app namespaces forbids hostNetwork, privileged, hostPath and running as root (the smoke test proves a privileged pod is rejected);
+    - default-deny egress NetworkPolicies (the collector's internet rule explicitly excludes `169.254.169.254`);
+    - keeping the node role to the EKS managed node policies (worker, ECR pull, CNI) so a stolen node role is worth little;
+    - limiting who may create pods in `kube-system`.
 - CI deploy role: `AmazonEKSEditPolicy` scoped to the `weather` namespace only (cannot touch `kube-system` or RBAC).
 - WAF: per-IP rate limit + AWS managed rules (IP reputation, common attacks, known bad inputs incl. Log4Shell).
 
@@ -73,16 +83,25 @@ Real issues are fixed (RDS secret rotation, exact module pins, state-bucket life
 - **Variable-controlled:** log retention, EKS endpoint CIDRs.
 - **Accepted with reason:** EKS public endpoint for GitHub-hosted runners; AWS-published LB-controller IAM policy; registry modules pinned by exact version + lock file instead of git commit hashes.
 
-**The three IAM skips (CKV_AWS_109, CKV_AWS_111, CKV_AWS_356):**
+**The three IAM checks (CKV_AWS_109, CKV_AWS_111, CKV_AWS_356): scoped exception, not a global skip**
 - **What the checks mean:**
-  - 109: permissions-management actions without resource limits.
-  - 111: write actions without resource limits.
+  - 109: permissions-management actions without resource limits;
+  - 111: write actions without resource limits;
   - 356: `"Resource": "*"`.
-- **Where they fire:** only on one policy, the **AWS Load Balancer Controller** policy created by `terraform-aws-modules/eks-pod-identity` (`attach_aws_lb_controller_policy = true` in `eks.tf`). Our own policies are scoped to exact ARNs; for example, `iam-pods.tf` limits each workload's `rds-db:connect` to its own DB user.
-- **Why we accept them:** this is the policy AWS publishes for the controller. It creates ALBs, target groups and security groups whose ARNs don't exist until it creates them, so `"*"` cannot be narrowed up front. AWS limits it with tag conditions, such as `elbv2.k8s.aws/cluster`, on the modify/delete actions.
-- **Who can use it:** only the controller's ServiceAccount, through Pod Identity.
-- **Stricter option:** fork the policy and add `aws:RequestTag`/`aws:ResourceTag` conditions for our cluster name on every write action. The cost is re-checking it on each controller upgrade.
-- **Why the skip is global:** it sits in `.checkov.yaml` rather than inline because the resource is inside a module, and Checkov can't skip one resource there. **Side effect:** a new `"*"` policy in our own code would not be flagged either, so IAM changes need a human review. A follow-up is to replace the global skip with a custom check that ignores only this module's policy.
+- **Where they fire:** without any exception, Checkov 3.4.11 reports 17 findings. All 17 are policy documents inside the pinned `terraform-aws-modules/eks-pod-identity` 2.11.0 call `lb_controller_pod_identity` in `eks.tf`.
+  - Only one of those documents is attached: the **AWS-published Load Balancer Controller policy**. The others (appmesh, ebs_csi, velero...) are templates the module builds but doesn't use (`count = 0`).
+  - That policy creates ALBs, target groups and security groups whose ARNs don't exist yet, so `"*"` can't be narrowed up front. AWS limits its modify/delete actions with `elbv2.k8s.aws/cluster` tag conditions.
+  - Only the controller's ServiceAccount can use it, through Pod Identity.
+- **How the exception is scoped:** `checkov:skip` comments **inside that one module block**. Checkov applies them only to resources of that module instance. Nothing is skipped in `.checkov.yaml`.
+- **Verified** with Checkov 3.4.11 in Docker, using the repo config:
+  - adding an over-broad policy (`iam:*`, `ec2:*` on `"*"`) to our own code → **5 failures** (CKV_AWS_107, 109, 110, 111, 356);
+  - removing it → **0 failed**.
+
+  Command to repeat it: add a `data "aws_iam_policy_document"` with `resources = ["*"]` in `infra/terraform`, then `docker run --rm -v "$PWD/infra:/infra" -w /infra bridgecrew/checkov:3.4.11 -d . --config-file .checkov.yaml --quiet --compact`.
+- **Remaining limits:**
+  - The exception covers the whole module instance, all 22 of its policy documents, not just the 17 findings. A future module version could change those policies without a new finding. The version is pinned, so that only happens through a reviewed version bump (Dependabot PR), and IAM diffs in such a bump need a human look.
+  - Narrower option: a Checkov **baseline** file per finding. It was rejected because it keys on the downloaded module's file path, which includes a git hash, so it breaks on every refresh.
+  - Stricter option: our own copy of the LB Controller policy with tag conditions on every write action.
 
 **EKS public API endpoint (CKV_AWS_38/39):** see D8.
 

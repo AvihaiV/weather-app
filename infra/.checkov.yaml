@@ -15,10 +15,8 @@ skip-check:
   - CKV_AWS_39   # Public endpoint kept (restricted by CIDR + IAM) so GitHub-hosted runners can deploy; private-only = self-hosted runners in VPC
   - CKV_AWS_37   # api/audit/authenticator logs enabled; controllerManager/scheduler skipped (cost, low security value)
   - CKV_AWS_338  # Log retention = var.log_retention_days (30 dev / 365 prod)
-  # --- AWS-published policies inside the pod-identity module ---
-  - CKV_AWS_356  # LB controller policy is the official AWS policy; other documents in the module are not created (count = 0)
-  - CKV_AWS_111
-  - CKV_AWS_109
+  # (CKV_AWS_109/111/356 are NOT skipped here: their exception is scoped inline to the one reviewed module
+  #  call in terraform/eks.tf, so an over-broad IAM policy anywhere else still fails.)
   # --- supply chain, handled differently ---
   - CKV_TF_1     # Registry modules pinned to exact versions + provider hashes in .terraform.lock.hcl; commit-hash pins need git sources
   - CKV_AWS_394  # AZs: we take the first 3 explicitly (slice), so new AZs do not change the subnet layout

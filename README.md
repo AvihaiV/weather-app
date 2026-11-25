@@ -8,7 +8,7 @@ Shows the current weather for 6 world cities and keeps a history of past reading
 |---|---|---|
 | App, Helm chart, Kubernetes security, monitoring | **Deployed** on kind (Kubernetes in Docker): on a laptop, and again on every CI run | CI job "Deploy to ephemeral kind + smoke tests" (14 checks) |
 | Local platform (kind, CloudNativePG, Prometheus/Grafana) | **Deployed** by Terraform in [`infra/local`](infra/local) | same CI job, plus `make local-up` |
-| AWS (VPC, EKS, RDS, ECR, WAF, OIDC, Pod Identity) | **Designed only.** Never applied, never tested against a real AWS account | `terraform validate`, `terraform test` with a mocked provider (5 tests), Checkov (657 passed, 0 failed, 7 skipped, each skip explained) |
+| AWS (VPC, EKS, RDS, ECR, WAF, OIDC, Pod Identity) | **Designed only.** Never applied, never tested against a real AWS account | `terraform validate`, `terraform test` with a mocked provider (5 tests), Checkov (0 failed; each remaining exception has a written reason, and the IAM ones are scoped to one module) |
 
 There was no AWS account for this task and no budget, so nothing here creates paid resources. The same Helm chart is meant for both targets; only the values file changes ([`values-local.yaml`](deploy/helm/weather/values-local.yaml) vs [`values-aws.yaml`](deploy/helm/weather/values-aws.yaml)).
 

@@ -52,7 +52,10 @@ module "eks" {
       max_size       = var.node_max_size
       desired_size   = var.node_min_size
 
-      # IMDSv2 only, hop limit 1: a pod cannot reach the node's metadata service and steal the node role.
+      # IMDSv2 only, hop limit 1: the IMDS token reply cannot cross the extra network hop of a normal
+      # (pod-network) pod, so ordinary pods can't get the node role's credentials. NOT a full boundary:
+      # hostNetwork pods and anything with node-level access (privileged pod, hostPath, container escape,
+      # SSM/SSH) still reach IMDS. Those are blocked by Pod Security restricted in app namespaces, not by this.
       metadata_options = {
         http_endpoint               = "enabled"
         http_tokens                 = "required"
@@ -66,6 +69,13 @@ module "eks" {
 module "lb_controller_pod_identity" {
   source  = "terraform-aws-modules/eks-pod-identity/aws"
   version = "2.11.0"
+  # Scoped Checkov exceptions: apply ONLY to policy documents inside this pinned module (reviewed).
+  # The attached one is AWS's published LB Controller policy: it must create/modify ALBs, target groups and
+  # security groups whose ARNs don't exist yet, so "Resource: *" can't be narrowed; AWS limits writes with
+  # elbv2.k8s.aws/cluster tag conditions. The module's other documents (appmesh, ebs_csi, velero...) are count = 0.
+  # checkov:skip=CKV_AWS_356:AWS-published LB Controller policy, see comment above
+  # checkov:skip=CKV_AWS_111:AWS-published LB Controller policy, see comment above
+  # checkov:skip=CKV_AWS_109:AWS-published LB Controller policy, see comment above
 
   name                            = "${local.name}-lb-controller"
   attach_aws_lb_controller_policy = true
