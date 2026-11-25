@@ -3,6 +3,8 @@ TAG ?= local-$(shell date +%Y%m%d%H%M%S)
 BACKEND  := weather-backend:$(TAG)
 FRONTEND := weather-frontend:$(TAG)
 TF_LOCAL := terraform -chdir=infra/local
+# Cluster kubeconfig lives outside the repo (it holds the admin key).
+export KUBECONFIG := $(HOME)/.kube/kind-weather
 
 .PHONY: help test images local-up local-down local-collect
 
@@ -23,7 +25,7 @@ local-up: images ## Create kind cluster + platform + app (UI on http://127.0.0.1
 	$(MAKE) local-collect
 
 local-collect: ## Run the collector once now instead of waiting for the schedule
-	kubectl --context kind-weather -n weather create job --from=cronjob/weather-collector collect-$(shell date +%s)
+	kubectl -n weather create job --from=cronjob/weather-collector collect-$(shell date +%s)
 
 local-down: ## Destroy the local cluster and everything in it
 	kind delete cluster --name weather

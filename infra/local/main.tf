@@ -197,7 +197,7 @@ resource "helm_release" "db" {
 resource "terraform_data" "db_ready" {
   triggers_replace = [helm_release.db.id]
   provisioner "local-exec" {
-    command = "kubectl --context kind-${var.cluster_name} -n weather-db wait cluster/weather-db --for=condition=Ready --timeout=600s"
+    command = "kubectl --kubeconfig ${kind_cluster.this.kubeconfig_path} -n weather-db wait cluster/weather-db --for=condition=Ready --timeout=600s"
   }
 }
 
@@ -217,7 +217,7 @@ resource "helm_release" "app" {
 }
 
 output "ui_url" { value = "http://127.0.0.1:${var.host_port}" }
-output "grafana" { value = "kubectl --context kind-${var.cluster_name} -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80  (user admin, password: terraform output -raw grafana_password)" }
+output "grafana" { value = "KUBECONFIG=~/.kube/kind-${var.cluster_name} kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80  (user admin, password: terraform output -raw grafana_password)" }
 output "grafana_password" {
   value     = random_password.grafana.result
   sensitive = true
