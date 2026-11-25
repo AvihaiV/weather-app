@@ -1,11 +1,15 @@
 # One image for api, collector and migrate (different commands): one thing to scan, sign and patch.
-FROM python:3.13-slim AS build
+FROM python:3.13-slim@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50 AS build
 WORKDIR /src
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-FROM python:3.13-slim
+FROM python:3.13-slim@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 LOCATIONS_FILE=/app/locations.json
+# Patch OS packages, and drop pip/setuptools from the runtime image: the app never installs anything at
+# runtime, and pip's bundled libraries (urllib3, msgpack) were the source of the image's Python CVEs.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall -y pip setuptools wheel
 COPY --from=build /install /usr/local
 WORKDIR /app
 COPY weather ./weather

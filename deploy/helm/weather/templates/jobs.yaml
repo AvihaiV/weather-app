@@ -10,7 +10,7 @@ spec:
   securityContext: {{- include "weather.podSecurity" 10001 | nindent 4 }}
   containers:
     - name: {{ .who }}
-      image: {{ $root.Values.images.backend }}
+      image: {{ $root.Values.images.backend | quote }}
       imagePullPolicy: {{ $root.Values.images.pullPolicy }}
       command: ["python", "-m", "weather.{{ .who }}"]
       env:

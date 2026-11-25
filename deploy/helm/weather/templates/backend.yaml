@@ -22,7 +22,7 @@ spec:
       {{- include "weather.spread" "backend" | nindent 6 }}
       containers:
         - name: api
-          image: {{ .Values.images.backend }}
+          image: {{ .Values.images.backend | quote }}
           imagePullPolicy: {{ .Values.images.pullPolicy }}
           ports: [{ name: http, containerPort: 8000 }]
           env:

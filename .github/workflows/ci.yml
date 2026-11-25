@@ -100,7 +100,7 @@ jobs:
           helm lint infra/local/charts/weather-db
           for v in values-local.yaml values-aws.yaml; do
             helm template weather deploy/helm/weather -f "deploy/helm/weather/$v" \
-              --set images.backend=x,images.frontend=y > "rendered-$v"
+              --set-string images.backend=ghcr.io/example/weather-backend:ci,images.frontend=ghcr.io/example/weather-frontend:ci > "rendered-$v"
           done
           helm template db infra/local/charts/weather-db > rendered-db.yaml
           # CRD-based kinds (ServiceMonitor, Cluster...) have no built-in schema: skipped, everything else strict.

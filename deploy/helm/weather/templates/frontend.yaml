@@ -21,7 +21,7 @@ spec:
       {{- include "weather.spread" "frontend" | nindent 6 }}
       containers:
         - name: nginx
-          image: {{ .Values.images.frontend }}
+          image: {{ .Values.images.frontend | quote }}
           imagePullPolicy: {{ .Values.images.pullPolicy }}
           ports: [{ name: http, containerPort: 8080 }]
           securityContext: {{- include "weather.containerSecurity" . | nindent 12 }}
