@@ -68,6 +68,25 @@ This happened here once: a kind kubeconfig was pushed because a pipe hid gitleak
 
 The best fix is to have **nothing to leak**. CI uses OIDC and pods use Pod Identity or generated secrets, so no long-lived keys exist to be committed.
 
+## If `terraform apply` was interrupted
+On the kind/CI environment: ignore it. The runner and the cluster are gone. For a persistent environment, **don't just rerun it**:
+1. **Is anyone else running?** Check the Actions tab and ask the team. Only then:
+   ```bash
+   terraform force-unlock <LOCK_ID>
+   ```
+   The ID is in the "Error acquiring the state lock" message.
+2. **See what really exists:** `terraform plan`. Look for creates of things that are already in AWS: those are orphans the state doesn't know about.
+3. **Fix the state, not the cloud:**
+   - **Orphans:** `terraform import` them, or use `import {}` blocks. Delete one by hand only if it is truly unwanted.
+   - **Half-created resources:** they are marked tainted and will be replaced. Check that this is fine (a DB replacement is not).
+   - **Helm:**
+     ```bash
+     helm -n <ns> status <release>
+     ```
+     If it is stuck in pending, run `helm rollback`, or uninstall it and run `terraform state rm` for it before you re-apply. That is what fixed incident D5 locally.
+4. **State file damaged?** Restore the previous version from the versioned S3 state bucket.
+5. **Apply again** from a fresh, reviewed plan, and write down what happened.
+
 ## Useful commands
 ```bash
 export KUBECONFIG=~/.kube/kind-weather
