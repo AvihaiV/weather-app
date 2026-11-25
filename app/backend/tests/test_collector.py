@@ -1,6 +1,10 @@
+import io
 import json
+import urllib.error
 
 import pytest
+
+from weather import collector
 
 from weather.collector import parse
 from weather.config import Location, load_locations
@@ -53,3 +57,48 @@ def test_locations_reject_bad_coordinates(tmp_path):
     f.write_text(json.dumps([{"name": "X", "lat": 200, "lon": 0}]))
     with pytest.raises(ValueError):
         load_locations(str(f))
+
+
+class _Resp(io.BytesIO):
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+
+def _http_error(code, retry_after=None):
+    hdrs = {"Retry-After": retry_after} if retry_after else {}
+    return urllib.error.HTTPError("u", code, "err", hdrs, None)
+
+
+def test_get_json_retries_rate_limit_then_succeeds(monkeypatch):
+    calls, sleeps = [], []
+    def fake_urlopen(url, timeout):
+        calls.append(url)
+        if len(calls) < 3:
+            raise _http_error(429, retry_after="1")
+        return _Resp(b'{"ok": true}')
+    monkeypatch.setattr(collector.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(collector.time, "sleep", sleeps.append)
+    assert collector._get_json("u") == {"ok": True}
+    assert len(calls) == 3 and sleeps == [1.0, 1.0]   # honoured Retry-After
+
+
+def test_get_json_does_not_retry_client_errors(monkeypatch):
+    calls = []
+    def fake_urlopen(url, timeout):
+        calls.append(url); raise _http_error(400)
+    monkeypatch.setattr(collector.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(collector.time, "sleep", lambda s: None)
+    with pytest.raises(urllib.error.HTTPError):
+        collector._get_json("u")
+    assert len(calls) == 1
+
+
+def test_get_json_gives_up_after_max_attempts(monkeypatch):
+    calls, sleeps = [], []
+    def fake_urlopen(url, timeout):
+        calls.append(url); raise _http_error(503)
+    monkeypatch.setattr(collector.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(collector.time, "sleep", sleeps.append)
+    with pytest.raises(urllib.error.HTTPError):
+        collector._get_json("u")
+    assert len(calls) == collector.MAX_ATTEMPTS and sleeps == [2, 4, 8]   # exponential, within the Job deadline

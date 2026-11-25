@@ -7,6 +7,8 @@ import logging
 import math
 import os
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -15,7 +17,33 @@ from weather import db
 from weather.config import Location, load_locations
 
 API_URL = "https://api.open-meteo.com/v1/forecast"
+RETRYABLE = {429, 500, 502, 503, 504}
+MAX_ATTEMPTS = 4
 log = logging.getLogger("collector")
+
+
+def _get_json(url: str):
+    """GET with retries: rate limits (429) and server errors are usually temporary.
+
+    Exponential backoff (2s, 4s, 8s), honouring Retry-After but capped at 30s so the whole run
+    stays inside the Job's activeDeadlineSeconds (120s). Client errors (4xx) fail immediately.
+    """
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as e:
+            if e.code not in RETRYABLE or attempt == MAX_ATTEMPTS:
+                raise
+            retry_after = e.headers.get("Retry-After") if e.headers else None
+            delay = min(float(retry_after) if retry_after and retry_after.isdigit() else 2 ** attempt, 30)
+            log.warning("weather API returned %s, retry %d/%d in %.0fs", e.code, attempt, MAX_ATTEMPTS - 1, delay)
+        except (urllib.error.URLError, TimeoutError) as e:
+            if attempt == MAX_ATTEMPTS:
+                raise
+            delay = 2 ** attempt
+            log.warning("weather API unreachable (%s), retry %d/%d in %ds", e, attempt, MAX_ATTEMPTS - 1, delay)
+        time.sleep(delay)
 
 
 def fetch(locations: tuple[Location, ...]) -> list[dict]:
@@ -26,8 +54,7 @@ def fetch(locations: tuple[Location, ...]) -> list[dict]:
                    "wind_speed_10m,wind_direction_10m,weather_code,is_day",
         "timezone": "auto",  # gives each city's UTC offset, so the UI can show local time
     })
-    with urllib.request.urlopen(f"{API_URL}?{query}", timeout=10) as resp:
-        payload = json.load(resp)
+    payload = _get_json(f"{API_URL}?{query}")
     # Open-Meteo returns a list for several locations, a single object for one.
     return payload if isinstance(payload, list) else [payload]
 
