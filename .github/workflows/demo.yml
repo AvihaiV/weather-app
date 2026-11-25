@@ -67,7 +67,9 @@ jobs:
             echo
             echo "Images: signed by this repo's CI on main and verified before deploy."
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "App: $APP"; echo "Grafana: $GRAFANA"
+          # Annotations show at the top of the run page immediately (the summary only appears when the job ends).
+          echo "::notice title=Weather app (live demo)::$APP"
+          echo "::notice title=Grafana read-only (live demo)::$GRAFANA"
       - name: Keep the demo up
         env: { MINUTES: "${{ inputs.minutes }}" }
         run: sleep $(( MINUTES * 60 ))
