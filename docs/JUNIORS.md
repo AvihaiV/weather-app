@@ -68,24 +68,30 @@ This happened here once: a kind kubeconfig was pushed because a pipe hid gitleak
 
 The best fix is to have **nothing to leak**. CI uses OIDC and pods use Pod Identity or generated secrets, so no long-lived keys exist to be committed.
 
-## If `terraform apply` was interrupted
-On the kind/CI environment: ignore it. The runner and the cluster are gone. For a persistent environment, **don't just rerun it**:
-1. **Is anyone else running?** Check the Actions tab and ask the team. Only then:
+## If a deploy was interrupted
+On kind/CI: ignore it. The runner and the cluster are gone. On a persistent environment, **inspect before you retry**. Never just rerun it.
+
+### Terraform apply
+1. **Is anyone else running?** Check the Actions tab and ask the team. Only then run `terraform force-unlock <LOCK_ID>` (the ID is in the "Error acquiring the state lock" message).
+2. **Compare reality with state.** List what really exists in AWS, by tags or names in the console or CLI, and compare it with `terraform state list` and `terraform plan`.
+   - **A create in the plan for something that already exists** means the resource is untracked: the apply was killed before state was saved. `import` it (or use an `import {}` block), or delete it by hand if it is truly unwanted.
+   - **A resource marked tainted** means the creation failed and Terraform recorded it. The plan will replace it. Confirm the replacement is acceptable: replacing a database is not.
+   - **Don't assume either case.** Check each resource.
+3. **State file damaged?** Restore the previous version from the versioned S3 state bucket.
+4. **Apply again** from a fresh plan, reviewed, and write down what happened.
+
+### Helm release
+1. **Look at the release first:**
    ```bash
-   terraform force-unlock <LOCK_ID>
+   helm -n <ns> status <release>
+   helm -n <ns> history <release>
    ```
-   The ID is in the "Error acquiring the state lock" message.
-2. **See what really exists:** `terraform plan`. Look for creates of things that are already in AWS: those are orphans the state doesn't know about.
-3. **Fix the state, not the cloud:**
-   - **Orphans:** `terraform import` them, or use `import {}` blocks. Delete one by hand only if it is truly unwanted.
-   - **Half-created resources:** they are marked tainted and will be replaced. Check that this is fine (a DB replacement is not).
-   - **Helm:**
-     ```bash
-     helm -n <ns> status <release>
-     ```
-     If it is stuck in pending, run `helm rollback`, or uninstall it and run `terraform state rm` for it before you re-apply. That is what fixed incident D5 locally.
-4. **State file damaged?** Restore the previous version from the versioned S3 state bucket.
-5. **Apply again** from a fresh, reviewed plan, and write down what happened.
+2. **`pending-upgrade`, with an earlier `deployed` revision:** roll back to that revision with `helm -n <ns> rollback <release> <revision>`, then deploy again.
+3. **`pending-install`, a first install with nothing to roll back to:**
+   - The only way out is `helm uninstall` and then install again. Before that, check what the release owns.
+   - The **app chart owns no data**: the database is a separate release, or RDS on AWS. Uninstalling it is safe, apart from the downtime.
+   - **A release that owns data is different.** The `weather-db` chart owns the CloudNativePG `Cluster`, so uninstalling it can delete the database. Back up first, or fix the release record instead of uninstalling.
+4. **If Terraform manages the release** (as in `infra/local`), also run `terraform state rm` for it after an uninstall, so the next apply recreates it cleanly.
 
 ## Useful commands
 ```bash

@@ -135,20 +135,34 @@ Changing repo visibility, access controls or a running demo is the owner's decis
 - **Gap:** the cluster itself does not check. Someone with cluster write access could run `kubectl set image` with an unsigned image and it would run.
 - **Why not now:** an admission controller (Sigstore policy-controller or Kyverno `verifyImages`) is one more always-on component with its own failure mode: if it fails closed, no pod can start. On a throwaway kind cluster, where CI is the only deployer, it would add nothing. On AWS it is **the next step**, together with ECR immutable tags (already on in the design).
 
-## D14. A pipeline cancelled in the middle of `terraform apply`
-- **Today (deployed):** the only `terraform apply` in any pipeline is `infra/local`, which builds the kind cluster **inside the runner**. If it is cancelled, the runner VM is destroyed along with the cluster and its local state, so nothing persists and nothing needs cleaning. That is why `cancel-in-progress: true` is safe in `ci.yml`. The demo workflow is the same.
-- **AWS (designed):** the runbook says a human runs `plan`/`apply` for `infra/terraform`, never CI. The future `deploy-aws` job would run only `helm upgrade`. Even so, a cancelled apply is the main risk for any persistent environment, so here is what happens:
-  1. **Signals:** on cancel, GitHub sends the step SIGINT, then SIGTERM, then kills it a few seconds later. This comes from GitHub's documentation and was not tested here.
-  2. **How Terraform reacts:** on the first interrupt it stops starting new operations and waits for the ones in flight, then writes state. That works only if the grace period lasts long enough. EKS, RDS or a NAT gateway take minutes, so the kill usually lands first.
-  3. **Possible results:**
-     - **State lock left behind:** the S3 lock file from `use_lockfile`. The next run fails with "Error acquiring the state lock".
-     - **Orphaned resources:** AWS keeps creating them server-side after the client dies, but they are not in state. The next apply either collides ("already exists") or creates a duplicate that costs money.
-     - **Tainted resources:** a resource that failed during create is marked tainted and is replaced on the next apply.
-     - **Helm releases stuck** in `pending-install`/`pending-upgrade`. `atomic` cannot roll back if it is killed too. This happened here locally: incident D5 in the private notes.
-- **Prevention, by design:**
-  - Persistent deploys get their **own concurrency group with `cancel-in-progress: false`**, so a new push waits instead of killing the running apply.
-  - `timeout-minutes` set well above the longest expected apply.
-  - Apply only a **saved, reviewed plan** (`plan -out`, then `apply plan.tfplan`), inside a protected GitHub environment with required reviewers.
-  - State bucket versioning is on (`infra/bootstrap`), so a damaged state can be restored.
-  - Nobody presses Cancel during an apply. If it must stop, let the first interrupt finish.
-- **Recovery runbook:** in [JUNIORS.md](JUNIORS.md#if-terraform-apply-was-interrupted).
+## D14. A pipeline cancelled in the middle of a deploy
+**Today (deployed):** the only `terraform apply` in any pipeline is `infra/local`, which builds the kind cluster **inside the runner**. A cancel destroys the runner VM together with the cluster and its local state. Nothing persists, so nothing needs cleaning. That is why `cancel-in-progress: true` is safe in `ci.yml`, and the demo workflow works the same way.
+
+**What a cancel does to the step** (GitHub's documented behaviour, not tested here): the runner sends SIGINT, then SIGTERM, then kills the process a few seconds later.
+
+### Terraform apply (AWS, designed)
+The runbook has a **human** run `plan`/`apply` for `infra/terraform`. CI does not. If an apply is interrupted anyway:
+- **Graceful interrupt:** on the first SIGINT, Terraform stops starting new operations and waits for the ones in flight to finish, then saves state. That only works if it is given the time. EKS, RDS and NAT operations take minutes, longer than a cancelled step's grace period.
+- **A creation that fails with an error:** Terraform usually records the object in state as **tainted**, and the next apply replaces it.
+- **A hard kill before state is saved:** a resource AWS has already created, or keeps creating server-side, can end up **untracked**: it exists in AWS but not in state. The next apply then collides ("already exists") or creates a paid duplicate. This is a different case from tainted, so don't assume everything is tainted.
+- **The state lock:** the S3 lock (`use_lockfile`) can be left behind, and the next run fails with "Error acquiring the state lock".
+- **Safeguards:**
+  - a human applies a **saved, reviewed plan** (`plan -out`, then `apply` that file);
+  - if this ever moves into CI: a protected environment with reviewers, its own concurrency group with `cancel-in-progress: false`, and a timeout well above the longest expected apply;
+  - the S3 lock, plus **versioning** on the state bucket (`infra/bootstrap`) so an earlier state can be restored.
+
+### Helm deploy (future `deploy-aws` job, not written yet)
+That job runs `helm upgrade --install`, **not** Terraform apply, so the risks and safeguards are different:
+- **If it is killed mid-release:** the release can stay in **`pending-install`** (first install, with no earlier revision to roll back to) or **`pending-upgrade`** (an earlier deployed revision exists). Every Helm command that follows is refused until someone deals with it.
+- **`--atomic` is not a guarantee here.** It rolls back only when Helm itself, still running, sees a failure. If the Helm process is killed, nothing rolls back.
+- **What still protects users:** Kubernetes keeps the objects that were already applied. Rolling updates use `maxUnavailable: 0`, so old pods keep serving until new ones are ready. That is how the design should behave; an interrupted AWS release was never tested.
+- **Safeguards:**
+  - its own concurrency group with `cancel-in-progress: false`;
+  - a protected environment with reviewers;
+  - a job `timeout-minutes` larger than Helm's own `--timeout`, so Helm times out and rolls back before the runner kills it;
+  - immutable image tags, so an older revision can always be re-deployed exactly.
+
+### Seen locally
+During local development I stopped a running `terraform apply` of `infra/local` while it was upgrading the app's Helm release. The release stayed in `pending-upgrade`, and further applies failed. On that disposable cluster I recovered with `helm uninstall` of the app release, which holds no data, then `terraform state rm` for that release, then a fresh apply.
+
+Recovery steps for both cases: [JUNIORS.md](JUNIORS.md#if-a-deploy-was-interrupted).
