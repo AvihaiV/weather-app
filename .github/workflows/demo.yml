@@ -71,10 +71,25 @@ jobs:
           export KUBECONFIG=$HOME/.kube/kind-weather
           kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80 >/dev/null 2>&1 &
           # Quick tunnels: no Cloudflare account or token needed, so no secret to store.
-          ./cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8088 > app-tunnel.log 2>&1 &
-          ./cloudflared tunnel --no-autoupdate --url http://127.0.0.1:3000 > grafana-tunnel.log 2>&1 &
-          url() { for _ in $(seq 1 60); do u=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$1" | head -1); [ -n "$u" ] && { echo "$u"; return; }; sleep 2; done; echo "tunnel failed"; }
-          APP=$(url app-tunnel.log); GRAFANA=$(url grafana-tunnel.log)
+          # They are best-effort (Cloudflare can rate-limit them): retry, show the error, fail instead of a dead link.
+          tunnel() {  # $1 = local port, $2 = log name
+            for attempt in 1 2 3; do
+              ./cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$1" > "$2.log" 2>&1 &
+              pid=$!
+              for _ in $(seq 1 45); do
+                u=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$2.log" | head -1)
+                [ -n "$u" ] && { echo "$u"; return 0; }
+                kill -0 "$pid" 2>/dev/null || break
+                sleep 2
+              done
+              kill "$pid" 2>/dev/null || true
+              echo "::warning::$2 attempt $attempt failed:" >&2; tail -5 "$2.log" >&2
+              sleep $(( attempt * 10 ))
+            done
+            return 1
+          }
+          APP=$(tunnel 8088 app-tunnel) || { echo "::error::app tunnel failed"; exit 1; }
+          GRAFANA=$(tunnel 3000 grafana-tunnel) || { echo "::error::Grafana tunnel failed"; exit 1; }
           {
             echo "## Live demo (up for ${{ inputs.minutes }} minutes)"
             echo "| | URL |"
