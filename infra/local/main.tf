@@ -197,8 +197,12 @@ resource "helm_release" "monitoring" {
   timeout    = 900 # first install pulls many images
   values = [
     file("${path.module}/monitoring-values.yaml"),
-    # Demo only: read-only anonymous viewers, so no admin password is ever printed or shared.
-    yamlencode({ grafana = { "grafana.ini" = { "auth.anonymous" = { enabled = var.grafana_anonymous, org_role = "Viewer" } } } }),
+    # Demo only: read-only anonymous viewers (no admin password is ever printed or shared), and the
+    # ~20 preloaded Kubernetes dashboards are not loaded, so the public sees only the 4 Weather dashboards.
+    yamlencode({ grafana = {
+      "grafana.ini"            = { "auth.anonymous" = { enabled = var.grafana_anonymous, org_role = "Viewer" } }
+      defaultDashboardsEnabled = !var.grafana_anonymous
+    } }),
   ]
   set_sensitive = [{ name = "grafana.adminPassword", value = random_password.grafana.result }]
 }
