@@ -1,0 +1,39 @@
+name: Deploy to kind
+description: Create a kind cluster in this runner and deploy platform + app with Terraform (infra/local)
+inputs:
+  backend-image:
+    description: Backend image reference present in the local Docker daemon
+    required: true
+  frontend-image:
+    description: Frontend image reference present in the local Docker daemon
+    required: true
+  monitoring:
+    description: Install Prometheus/Grafana
+    default: "false"
+  grafana-anonymous:
+    description: Read-only anonymous Grafana (demo only)
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
+      with:
+        version: v0.33.0
+        install_only: true
+    - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+      with:
+        terraform_version: 1.15.5
+        terraform_wrapper: false
+    - name: Terraform apply (kind + platform + app)
+      shell: bash
+      # Inputs go through env, never interpolated into the script: avoids shell injection.
+      env:
+        BACKEND: ${{ inputs.backend-image }}
+        FRONTEND: ${{ inputs.frontend-image }}
+        MONITORING: ${{ inputs.monitoring }}
+        GRAFANA_ANON: ${{ inputs.grafana-anonymous }}
+      run: |
+        terraform -chdir=infra/local init -input=false
+        terraform -chdir=infra/local apply -input=false -auto-approve \
+          -var "images={backend=\"$BACKEND\",frontend=\"$FRONTEND\"}" \
+          -var "monitoring_enabled=$MONITORING" -var "grafana_anonymous=$GRAFANA_ANON"

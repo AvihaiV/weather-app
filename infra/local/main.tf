@@ -37,6 +37,12 @@ variable "monitoring_enabled" {
   default = true
 }
 
+variable "grafana_anonymous" {
+  type        = bool
+  default     = false
+  description = "Demo only: let anyone with the URL view dashboards (read-only Viewer role, no admin)"
+}
+
 # ---------------- Cluster ----------------
 resource "kind_cluster" "this" {
   name           = var.cluster_name

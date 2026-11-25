@@ -1,0 +1,48 @@
+name: Verified images
+description: Pull backend/frontend from GHCR and verify their cosign signatures before anything uses them
+inputs:
+  tag:
+    description: Image tag to deploy (e.g. sha-<commit> or main)
+    required: true
+  token:
+    description: GITHUB_TOKEN with packages:read
+    required: true
+outputs:
+  backend:
+    description: Local image reference of the verified backend
+    value: ${{ steps.verify.outputs.backend }}
+  frontend:
+    description: Local image reference of the verified frontend
+    value: ${{ steps.verify.outputs.frontend }}
+runs:
+  using: composite
+  steps:
+    - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.token }}
+    - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+    - name: Pull, verify signature of the exact digest, tag locally
+      id: verify
+      shell: bash
+      env:
+        TAG: ${{ inputs.tag }}
+        OWNER: ${{ github.repository_owner }}
+        # Only images signed by THIS repo's CI workflow on main are accepted.
+        IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci.yml@refs/heads/main
+      run: |
+        set -euo pipefail
+        for c in backend frontend; do
+          img="ghcr.io/${OWNER,,}/weather-$c"
+          docker pull -q "$img:$TAG" >/dev/null
+          ref=$(docker inspect --format '{{index .RepoDigests 0}}' "$img:$TAG")   # img@sha256:...
+          cosign verify "$ref" \
+            --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          echo "verified: $ref"
+          # kind cannot load digest-only refs: tag the verified image locally (same bytes).
+          local_ref="weather-$c:verified-${ref##*:}"; local_ref="${local_ref:0:60}"
+          docker tag "$ref" "$local_ref"
+          echo "$c=$local_ref" >> "$GITHUB_OUTPUT"
+        done

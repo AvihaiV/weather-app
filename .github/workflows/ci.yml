@@ -1,0 +1,230 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege by default; jobs ask for more only where needed.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}   # never cancel a running main deploy
+
+jobs:
+  test:
+    name: Unit tests + dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app/backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: app/backend/requirements*.txt
+      - run: pip install -r requirements-dev.txt pip-audit==2.10.0
+      - run: python -m pytest -q
+      - name: pip-audit (known CVEs in dependencies)
+        run: pip-audit -r requirements.txt
+
+  secrets:
+    name: Secret scan (full history)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            git --no-banner --redact -v /repo
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write   # upload results to the Security tab
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+
+  iac:
+    name: IaC + manifests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with: { terraform_version: 1.15.5, terraform_wrapper: false }
+      - name: terraform fmt
+        run: terraform fmt -check -recursive infra
+      - name: terraform validate (all roots)
+        run: |
+          for d in infra/bootstrap infra/terraform infra/local; do
+            terraform -chdir="$d" init -backend=false -input=false >/dev/null
+            terraform -chdir="$d" validate
+          done
+      - name: terraform test (AWS design, mocked provider)
+        run: terraform -chdir=infra/terraform test
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.13" }
+      - name: Checkov
+        working-directory: infra
+        run: |
+          pip install checkov==3.4.11
+          checkov -d . --config-file .checkov.yaml --quiet
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+      - name: helm lint + kubeconform (schema validation of rendered manifests)
+        run: |
+          helm lint deploy/helm/weather -f deploy/helm/weather/values-local.yaml
+          helm lint infra/local/charts/weather-db
+          for v in values-local.yaml values-aws.yaml; do
+            helm template weather deploy/helm/weather -f "deploy/helm/weather/$v" \
+              --set images.backend=x,images.frontend=y > "rendered-$v"
+          done
+          helm template db infra/local/charts/weather-db > rendered-db.yaml
+          # CRD-based kinds (ServiceMonitor, Cluster...) have no built-in schema: skipped, everything else strict.
+          docker run --rm -v "$PWD:/w" -w /w ghcr.io/yannh/kubeconform:v0.8.0 \
+            -strict -summary -ignore-missing-schemas rendered-values-local.yaml rendered-values-aws.yaml rendered-db.yaml
+      - name: Trivy misconfiguration scan (Dockerfiles, Helm, K8s)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          skip-dirs: infra   # Terraform is covered by Checkov + terraform test
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+  build:
+    name: Build ${{ matrix.component }} image
+    needs: [test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write   # push to GHCR (main only)
+      id-token: write   # keyless cosign signing via GitHub OIDC (main only)
+    strategy:
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: Image name (GHCR needs lowercase)
+        id: img
+        env: { OWNER: "${{ github.repository_owner }}", COMPONENT: "${{ matrix.component }}" }
+        run: echo "name=ghcr.io/${OWNER,,}/weather-${COMPONENT}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build (local, for scanning)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: app/${{ matrix.component }}
+          load: true
+          tags: ${{ steps.img.outputs.name }}:scan
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+      - name: Trivy image scan (fail on fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.img.outputs.name }}:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      # ---- main only: publish, sign, attach SBOM ----
+      - name: Log in to GHCR
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}   # short-lived, per-job; no stored registry password
+      - name: Push
+        if: github.ref == 'refs/heads/main'
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: app/${{ matrix.component }}
+          push: true
+          tags: |
+            ${{ steps.img.outputs.name }}:sha-${{ github.sha }}
+            ${{ steps.img.outputs.name }}:main
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+      - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+        if: github.ref == 'refs/heads/main'
+      - name: Sign image (keyless, identity = this workflow)
+        if: github.ref == 'refs/heads/main'
+        env: { REF: "${{ steps.img.outputs.name }}@${{ steps.push.outputs.digest }}" }
+        run: cosign sign --yes "$REF"
+      - name: SBOM (SPDX)
+        if: github.ref == 'refs/heads/main'
+        uses: anchore/sbom-action@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
+        with:
+          image: ${{ steps.img.outputs.name }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+      - name: Attest SBOM to the image
+        if: github.ref == 'refs/heads/main'
+        env: { REF: "${{ steps.img.outputs.name }}@${{ steps.push.outputs.digest }}" }
+        run: cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$REF"
+
+  deploy:
+    name: Deploy to ephemeral kind + smoke tests
+    needs: [build, iac]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: Images from GHCR, signature verified (main)
+        if: github.ref == 'refs/heads/main'
+        uses: ./.github/actions/verified-images
+        id: signed
+        with:
+          tag: sha-${{ github.sha }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Images built locally (pull requests)
+        if: github.ref != 'refs/heads/main'
+        id: local
+        run: |
+          docker build -q -t weather-backend:pr app/backend >/dev/null
+          docker build -q -t weather-frontend:pr app/frontend >/dev/null
+          { echo "backend=weather-backend:pr"; echo "frontend=weather-frontend:pr"; } >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/kind-deploy
+        with:
+          backend-image: ${{ steps.signed.outputs.backend || steps.local.outputs.backend }}
+          frontend-image: ${{ steps.signed.outputs.frontend || steps.local.outputs.frontend }}
+      - name: Smoke tests (functional + security controls)
+        run: scripts/smoke-test.sh
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          export KUBECONFIG=$HOME/.kube/kind-weather
+          kubectl get pods -A -o wide || true
+          kubectl -n weather describe pods || true
+          kubectl -n weather logs -l app.kubernetes.io/name=weather --all-containers --tail=50 || true
+      # No teardown step needed: the runner VM (and the kind cluster inside it) is destroyed when the job ends.

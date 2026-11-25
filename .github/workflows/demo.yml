@@ -1,0 +1,74 @@
+name: Demo (temporary public URL)
+
+# Manually started: deploys the latest signed main images to kind in a runner, with monitoring,
+# and exposes the app + read-only Grafana through Cloudflare quick tunnels for N minutes.
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: Minutes to keep the demo up (1-120)
+        type: number
+        default: 30
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: demo
+  cancel-in-progress: true   # a new demo replaces the running one
+
+jobs:
+  demo:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150   # hard stop even if something hangs
+    steps:
+      - name: Validate input
+        env: { MINUTES: "${{ inputs.minutes }}" }
+        run: |
+          if ! [[ "$MINUTES" =~ ^[0-9]+$ ]] || (( MINUTES < 1 || MINUTES > 120 )); then
+            echo "minutes must be 1-120"; exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/verified-images
+        id: img
+        with:
+          tag: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/kind-deploy
+        with:
+          backend-image: ${{ steps.img.outputs.backend }}
+          frontend-image: ${{ steps.img.outputs.frontend }}
+          monitoring: "true"
+          grafana-anonymous: "true"
+      - name: Smoke tests
+        run: scripts/smoke-test.sh
+      - name: Install cloudflared (pinned version + checksum)
+        run: |
+          curl -fsSL -o cloudflared https://github.com/cloudflare/cloudflared/releases/download/2026.11.2/cloudflared-linux-amd64
+          echo "56f13335143ec0e22772963290683a84a04114a35ec64cbc794a4d39ff9bb8cf  cloudflared" | sha256sum -c -
+          chmod +x cloudflared
+      - name: Open tunnels and publish links
+        run: |
+          export KUBECONFIG=$HOME/.kube/kind-weather
+          kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80 >/dev/null 2>&1 &
+          # Quick tunnels: no Cloudflare account or token needed, so no secret to store.
+          ./cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8088 > app-tunnel.log 2>&1 &
+          ./cloudflared tunnel --no-autoupdate --url http://127.0.0.1:3000 > grafana-tunnel.log 2>&1 &
+          url() { for _ in $(seq 1 60); do u=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$1" | head -1); [ -n "$u" ] && { echo "$u"; return; }; sleep 2; done; echo "tunnel failed"; }
+          APP=$(url app-tunnel.log); GRAFANA=$(url grafana-tunnel.log)
+          {
+            echo "## Live demo (up for ${{ inputs.minutes }} minutes)"
+            echo "| | URL |"
+            echo "|---|---|"
+            echo "| Weather app | $APP |"
+            echo "| Grafana (read-only, folder **Weather**) | $GRAFANA |"
+            echo
+            echo "Images: signed by this repo's CI on main and verified before deploy."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "App: $APP"; echo "Grafana: $GRAFANA"
+      - name: Keep the demo up
+        env: { MINUTES: "${{ inputs.minutes }}" }
+        run: sleep $(( MINUTES * 60 ))
+      # The runner VM, the kind cluster and the tunnels all disappear when the job ends (success, failure, cancel or timeout).
