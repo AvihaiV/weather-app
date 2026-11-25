@@ -46,13 +46,17 @@ def _get_json(url: str):
         time.sleep(delay)
 
 
-def fetch(locations: tuple[Location, ...]) -> list[dict]:
+FIELDS = "temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code,is_day"
+
+
+def fetch(locations: tuple[Location, ...], section: str = "current", **extra) -> list[dict]:
+    """One batched request for all locations. section="current" (collector) or "hourly" (backfill)."""
     query = urllib.parse.urlencode({
         "latitude": ",".join(str(l.lat) for l in locations),
         "longitude": ",".join(str(l.lon) for l in locations),
-        "current": "temperature_2m,apparent_temperature,relative_humidity_2m,"
-                   "wind_speed_10m,wind_direction_10m,weather_code,is_day",
+        section: FIELDS,
         "timezone": "auto",  # gives each city's UTC offset, so the UI can show local time
+        **extra,
     })
     payload = _get_json(f"{API_URL}?{query}")
     # Open-Meteo returns a list for several locations, a single object for one.
@@ -66,10 +70,17 @@ def _num(value, low: float, high: float, name: str) -> float:
     return v
 
 
+def utc_offset(payload: dict) -> int:
+    return int(_num(payload["utc_offset_seconds"], -14 * 3600, 14 * 3600, "utc offset"))
+
+
 def parse(location: Location, payload: dict) -> dict:
     """Validate the external response (a trust boundary) before it reaches the database."""
-    cur = payload["current"]
-    offset = int(_num(payload["utc_offset_seconds"], -14 * 3600, 14 * 3600, "utc offset"))
+    return row(location, utc_offset(payload), payload["current"])
+
+
+def row(location: Location, offset: int, cur: dict) -> dict:
+    """Validate one observation (current or one hourly sample) and build a DB row."""
     # With timezone=auto, "time" is the city's local time: convert to UTC.
     observed_at = (datetime.fromisoformat(cur["time"]) - timedelta(seconds=offset)).replace(tzinfo=timezone.utc)
     return {

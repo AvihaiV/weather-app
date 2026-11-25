@@ -102,3 +102,18 @@ def test_get_json_gives_up_after_max_attempts(monkeypatch):
     with pytest.raises(urllib.error.HTTPError):
         collector._get_json("u")
     assert len(calls) == collector.MAX_ATTEMPTS and sleeps == [2, 4, 8]   # exponential, within the Job deadline
+
+
+def test_backfill_hourly_rows_skips_future_and_bad_samples():
+    from datetime import datetime, timezone
+    from weather.backfill import hourly_rows
+    payload = {"utc_offset_seconds": 0, "hourly": {
+        "time": ["2026-11-25T10:00", "2026-11-25T11:00", "2026-11-25T12:00", "2026-11-25T13:00"],
+        "temperature_2m": [10.0, None, 12.0, 13.0],   # None = not-yet-final hour -> skipped
+        "apparent_temperature": [9.0, 9.5, 11.0, 12.0], "relative_humidity_2m": [50, 51, 52, 53],
+        "wind_speed_10m": [5.0, 5.0, 6.0, 7.0], "wind_direction_10m": [90, 90, 95, 100],
+        "weather_code": [1, 1, 2, 3], "is_day": [1, 1, 1, 1]}}
+    now = datetime(2026, 11, 25, 12, 30, tzinfo=timezone.utc)
+    rows, bad = hourly_rows(LOC, payload, now)
+    assert [r["observed_at"].hour for r in rows] == [10, 12]   # 13:00 is in the future
+    assert bad == 1

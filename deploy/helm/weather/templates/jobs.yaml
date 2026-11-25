@@ -12,12 +12,13 @@ spec:
     - name: {{ .who }}
       image: {{ $root.Values.images.backend | quote }}
       imagePullPolicy: {{ $root.Values.images.pullPolicy }}
-      command: ["python", "-m", "weather.{{ .who }}"]
+      command: ["python", "-m", "weather.{{ .module | default .who }}"]
       env:
         {{- include "weather.dbEnv" (dict "root" $root "who" .who) | nindent 8 }}
         {{- if eq .who "collector" }}
         - { name: LOCATIONS_FILE, value: /config/locations.json }
         - { name: RETENTION_DAYS, value: {{ $root.Values.collector.retentionDays | quote }} }
+        - { name: BACKFILL_DAYS, value: {{ $root.Values.backfill.days | quote }} }
         {{- end }}
       securityContext: {{- include "weather.containerSecurity" . | nindent 8 }}
       resources:
@@ -81,3 +82,23 @@ spec:
   backoffLimit: 2
   activeDeadlineSeconds: 300
   template: {{- include "weather.batchPod" (dict "root" $ "who" "migrate") | nindent 4 }}
+{{- if .Values.backfill.enabled }}
+---
+# One-time history load after install: a fresh environment (CI, demo, DR) starts with real history,
+# not an empty chart. Runs as the collector (same ServiceAccount, NetworkPolicy and DB user): no new permissions.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: weather-backfill
+  labels: {{- include "weather.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector
+  annotations:
+    helm.sh/hook: post-install
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 180
+  ttlSecondsAfterFinished: 86400
+  template: {{- include "weather.batchPod" (dict "root" $ "who" "collector" "module" "backfill") | nindent 4 }}
+{{- end }}

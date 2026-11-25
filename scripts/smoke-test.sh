@@ -9,7 +9,7 @@ pass() { echo "PASS  $*"; }
 fail() { echo "FAIL  $*"; exit 1; }
 
 echo "== Functional"
-job="weather-collector-manual-$(date +%s)"
+job="weather-collector-manual-$(date +%s)-$RANDOM"   # unique even if another run starts in the same second
 kubectl -n "$NS" create job --from=cronjob/weather-collector "$job" >/dev/null
 # Wait for success OR failure (kubectl wait on "complete" alone would just hang until timeout on failure).
 status=""
@@ -36,6 +36,12 @@ if [ "$upstream_limited" = true ]; then
 else
   [ "$n" -ge 6 ] && pass "API returns $n cities" || fail "API returned $n cities"
 fi
+# History after a fresh install comes from the backfill hook (real hourly data, last 7 days).
+h=$(curl -sf "$URL/api/weather/history?location=London&hours=168" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+if [ "$h" -ge 24 ]; then pass "history available ($h hourly rows for London, 7 days)"
+elif kubectl -n "$NS" logs job/weather-backfill 2>/dev/null | grep -q "backfill skipped"; then
+  echo "WARN  backfill skipped (weather API unavailable): history will build up from the collector"
+else fail "history missing ($h rows) and backfill did not report why"; fi
 curl -sf -o /dev/null "$URL/" && pass "UI responds"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/weather/history?location=Nowhere")
 [ "$code" = 404 ] && pass "unknown city rejected (allow-list)" || fail "unknown city -> $code"

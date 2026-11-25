@@ -25,6 +25,11 @@ collector:
   schedule: "*/15 * * * *"
   retentionDays: 90
 
+# Load real hourly history once after install (Open-Meteo past_days), so new environments are not empty.
+backfill:
+  enabled: true
+  days: 7
+
 locations:
   - { name: "Tel Aviv", lat: 32.0853, lon: 34.7818 }
   - { name: "London", lat: 51.5074, lon: -0.1278 }
