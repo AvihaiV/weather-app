@@ -68,8 +68,9 @@ jobs:
             echo "Images: signed by this repo's CI on main and verified before deploy."
           } >> "$GITHUB_STEP_SUMMARY"
           # Annotations show at the top of the run page immediately (the summary only appears when the job ends).
-          echo "::notice title=Weather app (live demo)::$APP"
-          echo "::notice title=Grafana read-only (live demo)::$GRAFANA"
+          # The label is in the message too: GitHub's annotation list doesn't always show the title.
+          echo "::notice title=Weather app (live demo)::Weather app: $APP"
+          echo "::notice title=Grafana (live demo)::Grafana dashboards (read-only, no login, folder Weather): $GRAFANA"
       - name: Keep the demo up
         env: { MINUTES: "${{ inputs.minutes }}" }
         run: sleep $(( MINUTES * 60 ))

@@ -188,14 +188,18 @@ resource "random_password" "grafana" {
 }
 
 resource "helm_release" "monitoring" {
-  count         = var.monitoring_enabled ? 1 : 0
-  name          = "kube-prometheus-stack"
-  repository    = "https://prometheus-community.github.io/helm-charts"
-  chart         = "kube-prometheus-stack"
-  version       = "93.11.0"
-  namespace     = kubernetes_namespace_v1.this["monitoring"].metadata[0].name
-  timeout       = 900 # first install pulls many images
-  values        = [file("${path.module}/monitoring-values.yaml")]
+  count      = var.monitoring_enabled ? 1 : 0
+  name       = "kube-prometheus-stack"
+  repository = "https://prometheus-community.github.io/helm-charts"
+  chart      = "kube-prometheus-stack"
+  version    = "93.11.0"
+  namespace  = kubernetes_namespace_v1.this["monitoring"].metadata[0].name
+  timeout    = 900 # first install pulls many images
+  values = [
+    file("${path.module}/monitoring-values.yaml"),
+    # Demo only: read-only anonymous viewers, so no admin password is ever printed or shared.
+    yamlencode({ grafana = { "grafana.ini" = { "auth.anonymous" = { enabled = var.grafana_anonymous, org_role = "Viewer" } } } }),
+  ]
   set_sensitive = [{ name = "grafana.adminPassword", value = random_password.grafana.result }]
 }
 
