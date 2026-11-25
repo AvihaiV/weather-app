@@ -102,7 +102,13 @@ def row(location: Location, offset: int, cur: dict) -> dict:
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format='{"level":"%(levelname)s","msg":"%(message)s"}')
     locations = load_locations()
-    payloads = fetch(locations)
+    try:
+        payloads = fetch(locations)
+    except (urllib.error.URLError, TimeoutError, OSError) as e:   # HTTPError is a URLError
+        # One clear marker for any upstream outage (429, 5xx, timeout, DNS, TLS) after retries.
+        # Still a failed run: the Job shows Failed and the WeatherDataStale alert will fire.
+        log.error("weather API unavailable after retries: %s", e)
+        return 1
     if len(payloads) != len(locations):
         log.error("expected %d results, got %d", len(locations), len(payloads))
         return 1

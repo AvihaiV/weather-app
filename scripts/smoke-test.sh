@@ -21,9 +21,9 @@ done
 upstream_limited=false
 if [[ "$status" == *Complete* ]]; then
   pass "collector job completed"
-elif kubectl -n "$NS" logs "job/$job" 2>/dev/null | grep -q "HTTP Error 429"; then
-  # External dependency, not our code: shared CI runner IPs hit Open-Meteo's free-tier rate limit.
-  echo "WARN  collector rate-limited by Open-Meteo (HTTP 429) after retries: external dependency, data checks skipped"
+elif kubectl -n "$NS" logs "job/$job" 2>/dev/null | grep -q "weather API unavailable"; then
+  # External dependency, not our code (seen in CI: 429 from shared runner IPs, TLS handshake timeouts).
+  echo "WARN  Open-Meteo unavailable after retries: external dependency, data checks skipped"
   upstream_limited=true
 else
   kubectl -n "$NS" logs "job/$job" --tail=20 2>/dev/null || true
