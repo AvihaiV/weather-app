@@ -35,12 +35,13 @@ Status labels: **deployed** (runs in CI / locally), **designed** (written + stat
 - Three DB users: `weather_api` (SELECT only), `weather_collector` (SELECT/INSERT/DELETE), `weather_migrate` (owns the schema).
 - Each workload has its own ServiceAccount → its own IAM role → may log in only as its own user.
 - A compromised API pod cannot write or delete data.
+- **Why the collector has DELETE:** it also runs the retention cleanup (rows older than `RETENTION_DAYS`, default 90) in the same transaction as the insert, so there is no second job with its own credentials. **Risk:** a compromised collector could delete history. **Limits on that risk:** the collector has no ingress, its egress is limited to HTTPS (no private ranges, no metadata service) plus Postgres, and each run lasts about a minute. Backups and point-in-time recovery (CNPG/RDS) can restore deleted rows. **Stricter option:** a separate retention CronJob with its own DELETE-only role, or time-partitioned tables where the migrate role drops old partitions, leaving the collector with INSERT only.
 
 ## D6. Kubernetes hardening
 - Pod Security Admission **restricted** enforced on the app namespace: non-root, no privilege escalation, all capabilities dropped, seccomp RuntimeDefault, read-only root filesystem.
 - **Default-deny NetworkPolicies**, then one explicit allow per flow. The collector may reach the internet on 443 but **not** private ranges or the cloud metadata service.
 - `automountServiceAccountToken: false`: no workload talks to the Kubernetes API.
-- Resilience: 2+ replicas, topology spread across nodes/zones, PodDisruptionBudgets, HPA, rolling updates with `maxUnavailable: 0`, liveness (process only) vs readiness (DB reachable) probes.
+- Resilience: 2+ replicas, topology spread across nodes/zones (on kind the "zones" are only node labels: this tests the scheduling rules, not real AZ failure), PodDisruptionBudgets, HPA, rolling updates with `maxUnavailable: 0`, liveness (process only) vs readiness (DB reachable) probes.
 - Schema migration runs as a Helm pre-upgrade hook; a failed migration fails the release and the old version keeps serving (`atomic`).
 
 ## D7. Infrastructure targets: local/CI (deployed) and AWS (designed)
@@ -72,8 +73,45 @@ Real issues are fixed (RDS secret rotation, exact module pins, state-bucket life
 - **Variable-controlled:** log retention, EKS endpoint CIDRs.
 - **Accepted with reason:** EKS public endpoint for GitHub-hosted runners; AWS-published LB-controller IAM policy; registry modules pinned by exact version + lock file instead of git commit hashes.
 
+**The three IAM skips (CKV_AWS_109, CKV_AWS_111, CKV_AWS_356):**
+- **What the checks mean:**
+  - 109: permissions-management actions without resource limits.
+  - 111: write actions without resource limits.
+  - 356: `"Resource": "*"`.
+- **Where they fire:** only on one policy, the **AWS Load Balancer Controller** policy created by `terraform-aws-modules/eks-pod-identity` (`attach_aws_lb_controller_policy = true` in `eks.tf`). Our own policies are scoped to exact ARNs; for example, `iam-pods.tf` limits each workload's `rds-db:connect` to its own DB user.
+- **Why we accept them:** this is the policy AWS publishes for the controller. It creates ALBs, target groups and security groups whose ARNs don't exist until it creates them, so `"*"` cannot be narrowed up front. AWS limits it with tag conditions, such as `elbv2.k8s.aws/cluster`, on the modify/delete actions.
+- **Who can use it:** only the controller's ServiceAccount, through Pod Identity.
+- **Stricter option:** fork the policy and add `aws:RequestTag`/`aws:ResourceTag` conditions for our cluster name on every write action. The cost is re-checking it on each controller upgrade.
+- **Why the skip is global:** it sits in `.checkov.yaml` rather than inline because the resource is inside a module, and Checkov can't skip one resource there. **Side effect:** a new `"*"` policy in our own code would not be flagged either, so IAM changes need a human review. A follow-up is to replace the global skip with a custom check that ignores only this module's policy.
+
+**EKS public API endpoint (CKV_AWS_38/39):** see D8.
+
 ## D11. Supply chain
 - Python deps pinned; `pip-audit` in CI (it already caught Starlette CVEs in the first pins).
 - Terraform modules pinned to exact versions; provider hashes in `.terraform.lock.hcl`.
 - Container images: immutable tags (ECR), signed (cosign keyless) and verified before deploy; RDS CA bundle downloaded with a pinned SHA-256 checksum.
 - kind node image pinned by digest.
+
+## D12. Public demo exposure
+- **What is exposed:** the Demo workflow publishes two Cloudflare quick-tunnel URLs, one for the app and one for Grafana.
+- **Who can see the URLs:** they appear in the run annotations and the step summary. The repo is public, so **anyone can read the URLs** while the demo is up. The approval to start a run (whoever can press "Run workflow") is separate: it does **not** control who opens the URLs afterwards.
+- **What a visitor gets:**
+  - App: the same read-only UI that is meant to be public anyway.
+  - Grafana: anonymous **Viewer**, with only the 4 Weather dashboards loaded and no admin password printed anywhere. However, a Viewer can still send **any** PromQL query to the Prometheus data source through Grafana's query API. In practice anyone can read every metric of that throwaway cluster: pod names, resource usage, request rates. None of it is a secret, and nothing user-related is stored, but it is more than "4 dashboards".
+- **Limits:** 1–120 minutes; the job's hard timeout is 150 minutes; runner, cluster and tunnels are destroyed when the job ends; a new demo cancels the running one.
+- **Recommendation:** keep it as an **explicitly time-limited demo**: short runs (30 min), started only when someone is about to look, and stopped after.
+
+| Option | Effect | Cost |
+|---|---|---|
+| Keep it as is (chosen) | anyone who reads the log can open the URLs during the run | none |
+| Grafana "public dashboards" (shared dashboard links) instead of anonymous access | visitors run only the queries saved in those panels | small config change; preview-level feature, check per Grafana version |
+| Mask the URLs in the log and send them some other way (e.g. an encrypted artifact) | URLs are not public | needs a delivery channel |
+| Make the repo private | logs visible to collaborators only | reviewers need access; changes the submission |
+| Cloudflare Access / named tunnel with login | real authentication | a Cloudflare account and an API token stored as a secret |
+
+Changing repo visibility, access controls or a running demo is the owner's decision. None of these is applied by default.
+
+## D13. Image signatures: verified in CI, not enforced in the cluster
+- **Today:** the deploy step runs `cosign verify` on the exact digest, against this repo's `ci.yml` identity on `main`, before Helm gets the image. A tampered or unsigned image therefore never reaches the deploy. GHCR tags are only `sha-<commit>`.
+- **Gap:** the cluster itself does not check. Someone with cluster write access could run `kubectl set image` with an unsigned image and it would run.
+- **Why not now:** an admission controller (Sigstore policy-controller or Kyverno `verifyImages`) is one more always-on component with its own failure mode: if it fails closed, no pod can start. On a throwaway kind cluster, where CI is the only deployer, it would add nothing. On AWS it is **the next step**, together with ECR immutable tags (already on in the design).
