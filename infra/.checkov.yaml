@@ -1,0 +1,24 @@
+# Checkov config for infra/. Skips here are for resources INSIDE community modules (no inline comments possible)
+# or checks that cannot see variable values. Each one is a reviewed decision, not a silence. See docs/decisions.md.
+framework: [terraform]
+download-external-modules: true
+compact: true
+skip-check:
+  # --- false positives: the setting IS configured, Checkov cannot evaluate it statically ---
+  - CKV_AWS_58   # EKS secrets encryption: module default encryption_config = { resources = ["secrets"] } with its own KMS key
+  - CKV2_AWS_12  # VPC default SG: module manages it with zero rules (manage_default_security_group defaults to true)
+  - CKV2_AWS_5   # Module SGs are attached by the module itself (nodes, cluster)
+  - CKV_AWS_133  # RDS backups: backup_retention_period = 7 is set; check misreads the module
+  - CKV_AWS_304  # RDS master secret rotation: set to 30 days in rds.tf; Checkov reads the module variable default (null)
+  # --- accepted, controlled by variables ---
+  - CKV_AWS_38   # EKS public endpoint CIDRs come from var.eks_public_access_cidrs; prod_guardrails forbids 0.0.0.0/0
+  - CKV_AWS_39   # Public endpoint kept (restricted by CIDR + IAM) so GitHub-hosted runners can deploy; private-only = self-hosted runners in VPC
+  - CKV_AWS_37   # api/audit/authenticator logs enabled; controllerManager/scheduler skipped (cost, low security value)
+  - CKV_AWS_338  # Log retention = var.log_retention_days (30 dev / 365 prod)
+  # --- AWS-published policies inside the pod-identity module ---
+  - CKV_AWS_356  # LB controller policy is the official AWS policy; other documents in the module are not created (count = 0)
+  - CKV_AWS_111
+  - CKV_AWS_109
+  # --- supply chain, handled differently ---
+  - CKV_TF_1     # Registry modules pinned to exact versions + provider hashes in .terraform.lock.hcl; commit-hash pins need git sources
+  - CKV_AWS_394  # AZs: we take the first 3 explicitly (slice), so new AZs do not change the subnet layout

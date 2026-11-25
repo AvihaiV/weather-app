@@ -1,0 +1,63 @@
+# Defaults are secure. Environment files (values-local.yaml / values-aws.yaml) only change where things run.
+images:
+  backend: weather-backend:dev   # full reference; CI passes registry/name@sha256:digest
+  frontend: weather-frontend:dev
+  pullPolicy: IfNotPresent
+
+backend:
+  replicas: 2
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  autoscaling: { enabled: true, maxReplicas: 6, targetCPU: 70 }
+
+frontend:
+  replicas: 2
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { cpu: 250m, memory: 128Mi }
+  autoscaling: { enabled: true, maxReplicas: 6, targetCPU: 70 }
+  service:
+    type: ClusterIP   # local: NodePort (kind maps it to the host); AWS: ClusterIP behind the ALB Ingress
+    nodePort: null
+
+collector:
+  schedule: "*/15 * * * *"
+  retentionDays: 90
+
+locations:
+  - { name: "Tel Aviv", lat: 32.0853, lon: 34.7818 }
+  - { name: "London", lat: 51.5074, lon: -0.1278 }
+  - { name: "New York", lat: 40.7128, lon: -74.006 }
+  - { name: "Tokyo", lat: 35.6762, lon: 139.6503 }
+  - { name: "Sydney", lat: -33.8688, lon: 151.2093 }
+  - { name: "Sao Paulo", lat: -23.5505, lon: -46.6333 }
+
+db:
+  host: ""
+  port: 5432
+  name: weather
+  sslMode: verify-full
+  sslRootCert: ""
+  # password: each workload reads its own password from a Secret (local).
+  # iam: each workload gets a 15-minute IAM token via EKS Pod Identity (AWS). No password exists.
+  auth: password
+  awsRegion: ""
+  users: { backend: weather_api, collector: weather_collector, migrate: weather_migrate }
+  passwordSecrets: { backend: weather-api-db, collector: weather-collector-db, migrate: weather-migrate-db }
+  # NetworkPolicy "to" peers that reach the database (env-specific).
+  egressTo: []
+
+networkPolicy:
+  enabled: true
+  # Namespace allowed to scrape /metrics.
+  monitoringNamespace: monitoring
+
+monitoring:
+  enabled: false   # ServiceMonitor + alert rules; needs the Prometheus Operator CRDs
+
+ingress:
+  enabled: false   # AWS only (ALB)
+  host: ""
+  certificateArn: ""
+  wafAclArn: ""

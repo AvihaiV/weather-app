@@ -1,0 +1,12 @@
+# Production: the prod_guardrails validation rejects anything weaker than this.
+environment             = "prod"
+github_repo             = "your-org/weather-app"
+state_bucket_name       = "your-org-weather-tfstate"
+eks_public_access_cidrs = ["203.0.113.10/32"]
+single_nat_gateway      = false
+db_multi_az             = true
+db_instance_class       = "db.t4g.small"
+db_deletion_protection  = true
+node_min_size           = 3
+node_max_size           = 6
+log_retention_days      = 365

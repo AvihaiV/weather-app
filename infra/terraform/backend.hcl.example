@@ -1,0 +1,4 @@
+# terraform init -backend-config=backend.hcl   (copy this file to backend.hcl; one state key per environment)
+bucket = "your-org-weather-tfstate"
+key    = "weather/dev/terraform.tfstate"
+region = "eu-west-1"

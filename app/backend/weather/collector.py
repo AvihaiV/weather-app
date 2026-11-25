@@ -1,0 +1,84 @@
+"""Collector: runs as a K8s CronJob. Fetches current weather for all locations and stores it.
+
+Open-Meteo needs no API key, so this service has no third-party secret to protect.
+"""
+import json
+import logging
+import math
+import os
+import sys
+import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta, timezone
+
+from weather import db
+from weather.config import Location, load_locations
+
+API_URL = "https://api.open-meteo.com/v1/forecast"
+log = logging.getLogger("collector")
+
+
+def fetch(locations: tuple[Location, ...]) -> list[dict]:
+    query = urllib.parse.urlencode({
+        "latitude": ",".join(str(l.lat) for l in locations),
+        "longitude": ",".join(str(l.lon) for l in locations),
+        "current": "temperature_2m,apparent_temperature,relative_humidity_2m,"
+                   "wind_speed_10m,wind_direction_10m,weather_code,is_day",
+        "timezone": "auto",  # gives each city's UTC offset, so the UI can show local time
+    })
+    with urllib.request.urlopen(f"{API_URL}?{query}", timeout=10) as resp:
+        payload = json.load(resp)
+    # Open-Meteo returns a list for several locations, a single object for one.
+    return payload if isinstance(payload, list) else [payload]
+
+
+def _num(value, low: float, high: float, name: str) -> float:
+    v = float(value)
+    if not (math.isfinite(v) and low <= v <= high):
+        raise ValueError(f"{name} out of range: {v}")
+    return v
+
+
+def parse(location: Location, payload: dict) -> dict:
+    """Validate the external response (a trust boundary) before it reaches the database."""
+    cur = payload["current"]
+    offset = int(_num(payload["utc_offset_seconds"], -14 * 3600, 14 * 3600, "utc offset"))
+    # With timezone=auto, "time" is the city's local time: convert to UTC.
+    observed_at = (datetime.fromisoformat(cur["time"]) - timedelta(seconds=offset)).replace(tzinfo=timezone.utc)
+    return {
+        "location": location.name,
+        "observed_at": observed_at,
+        "latitude": location.lat,
+        "longitude": location.lon,
+        "temperature_c": _num(cur["temperature_2m"], -100, 70, "temperature"),
+        "apparent_temperature_c": _num(cur["apparent_temperature"], -120, 80, "apparent temperature"),
+        "humidity_pct": int(_num(cur["relative_humidity_2m"], 0, 100, "humidity")),
+        "wind_speed_kmh": _num(cur["wind_speed_10m"], 0, 500, "wind speed"),
+        "wind_direction_deg": int(_num(cur["wind_direction_10m"], 0, 360, "wind direction")),
+        "weather_code": int(_num(cur["weather_code"], 0, 99, "weather code")),
+        "is_day": bool(_num(cur["is_day"], 0, 1, "is_day")),
+        "utc_offset_seconds": offset,
+    }
+
+
+def main() -> int:
+    logging.basicConfig(level=logging.INFO, format='{"level":"%(levelname)s","msg":"%(message)s"}')
+    locations = load_locations()
+    payloads = fetch(locations)
+    if len(payloads) != len(locations):
+        log.error("expected %d results, got %d", len(locations), len(payloads))
+        return 1
+    rows, failed = [], 0
+    for loc, payload in zip(locations, payloads):
+        try:
+            rows.append(parse(loc, payload))
+        except (KeyError, ValueError, TypeError) as e:
+            failed += 1
+            log.error("bad data for %s: %s", loc.name, e)
+    stored = db.insert_observations(rows, int(os.environ.get("RETENTION_DAYS", "90")))
+    log.info("stored %d observations, %d failed", stored, failed)
+    return 1 if failed else 0  # non-zero marks the Job failed, which alerting picks up
+
+
+if __name__ == "__main__":
+    sys.exit(main())

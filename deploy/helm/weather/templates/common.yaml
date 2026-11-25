@@ -1,0 +1,17 @@
+# One ServiceAccount per workload: on AWS each maps to its own IAM role (Pod Identity), so each gets only its own DB user.
+{{- range $who := list "backend" "collector" }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: weather-{{ $who }}
+  labels: {{- include "weather.labels" $ | nindent 4 }}
+automountServiceAccountToken: false   # no workload talks to the Kubernetes API
+---
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: weather-locations
+  labels: {{- include "weather.labels" . | nindent 4 }}
+data:
+  locations.json: {{ .Values.locations | toJson | quote }}

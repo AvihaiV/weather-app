@@ -1,0 +1,12 @@
+# kind cluster (infra/local). DB = CloudNativePG cluster in namespace weather-db.
+frontend:
+  service: { type: NodePort, nodePort: 30080 }
+db:
+  host: weather-db-rw.weather-db.svc
+  sslMode: require   # TLS on; CA lives in another namespace, so no hostname verification locally
+  auth: password
+  egressTo:
+    - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: weather-db } }
+      podSelector: { matchLabels: { cnpg.io/cluster: weather-db } }
+monitoring:
+  enabled: true

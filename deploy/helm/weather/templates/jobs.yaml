@@ -1,0 +1,83 @@
+{{- define "weather.batchPod" -}}
+{{- $root := .root }}
+metadata:
+  labels: {{- include "weather.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ .who }}
+spec:
+  serviceAccountName: weather-{{ .who }}
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  securityContext: {{- include "weather.podSecurity" 10001 | nindent 4 }}
+  containers:
+    - name: {{ .who }}
+      image: {{ $root.Values.images.backend }}
+      imagePullPolicy: {{ $root.Values.images.pullPolicy }}
+      command: ["python", "-m", "weather.{{ .who }}"]
+      env:
+        {{- include "weather.dbEnv" (dict "root" $root "who" .who) | nindent 8 }}
+        {{- if eq .who "collector" }}
+        - { name: LOCATIONS_FILE, value: /config/locations.json }
+        - { name: RETENTION_DAYS, value: {{ $root.Values.collector.retentionDays | quote }} }
+        {{- end }}
+      securityContext: {{- include "weather.containerSecurity" . | nindent 8 }}
+      resources:
+        requests: { cpu: 20m, memory: 64Mi }
+        limits: { cpu: 250m, memory: 192Mi }
+      volumeMounts:
+        {{- if eq .who "collector" }}
+        - { name: config, mountPath: /config, readOnly: true }
+        {{- end }}
+        - { name: tmp, mountPath: /tmp }
+  volumes:
+    {{- if eq .who "collector" }}
+    - name: config
+      configMap: { name: weather-locations }
+    {{- end }}
+    - name: tmp
+      emptyDir: { sizeLimit: 16Mi }
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: weather-collector
+  labels: {{- include "weather.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector
+spec:
+  schedule: {{ .Values.collector.schedule | quote }}
+  concurrencyPolicy: Forbid          # never two collectors at once
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 120     # a hung run is killed, not left consuming resources
+      ttlSecondsAfterFinished: 86400
+      template: {{- include "weather.batchPod" (dict "root" $ "who" "collector") | nindent 8 }}
+---
+# Schema migration runs before every install/upgrade. If it fails, the release fails and the old pods keep serving.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: weather-migrate
+  labels: {{- include "weather.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: weather-migrate
+  labels: {{- include "weather.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation   # keep the last run's logs for debugging
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template: {{- include "weather.batchPod" (dict "root" $ "who" "migrate") | nindent 4 }}

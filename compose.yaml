@@ -1,0 +1,45 @@
+# Local development only. Production runs on EKS + RDS (see infra/ and deploy/).
+# Usage (once): echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" > .env   (.env is gitignored)
+# Then: docker compose up -d --build && docker compose run --rm collector
+# The DB volume keeps the first password; to change it run `docker compose down -v` first.
+x-db-env: &db-env
+  DB_HOST: db
+  DB_NAME: weather
+  DB_USER: weather
+  DB_PASSWORD: ${POSTGRES_PASSWORD:?create .env first, see top of file}
+  DB_SSLMODE: disable  # local container network only; RDS uses verify-full
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: weather
+      POSTGRES_USER: weather
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?create .env first, see top of file}
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "weather"]
+      interval: 2s
+      retries: 15
+    # No published port: the DB is reachable only inside the compose network.
+
+  migrate:
+    build: app/backend
+    command: ["python", "-m", "weather.migrate"]
+    environment: *db-env
+    depends_on: { db: { condition: service_healthy } }
+
+  collector:
+    build: app/backend
+    command: ["python", "-m", "weather.collector"]
+    environment: *db-env
+    depends_on: { migrate: { condition: service_completed_successfully } }
+
+  weather-backend:
+    build: app/backend
+    environment: *db-env
+    depends_on: { migrate: { condition: service_completed_successfully } }
+
+  frontend:
+    build: app/frontend
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on: [weather-backend]

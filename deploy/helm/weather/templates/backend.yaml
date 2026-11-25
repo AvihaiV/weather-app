@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-backend
+  labels: {{- include "weather.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels: {{- include "weather.selector" "backend" | nindent 6 }}
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }   # never drop below desired capacity during a deploy
+  template:
+    metadata:
+      labels: {{- include "weather.labels" . | nindent 8 }}
+        app.kubernetes.io/component: backend
+    spec:
+      serviceAccountName: weather-backend
+      automountServiceAccountToken: false
+      securityContext: {{- include "weather.podSecurity" 10001 | nindent 8 }}
+      {{- include "weather.spread" "backend" | nindent 6 }}
+      containers:
+        - name: api
+          image: {{ .Values.images.backend }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          ports: [{ name: http, containerPort: 8000 }]
+          env:
+            {{- include "weather.dbEnv" (dict "root" $ "who" "backend") | nindent 12 }}
+            - { name: LOCATIONS_FILE, value: /config/locations.json }
+          securityContext: {{- include "weather.containerSecurity" . | nindent 12 }}
+          resources: {{- toYaml .Values.backend.resources | nindent 12 }}
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 2
+            failureThreshold: 15
+          livenessProbe:    # process health only: a DB outage must not restart every pod
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          readinessProbe:   # DB reachable: otherwise take this pod out of the Service
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 6
+          volumeMounts:
+            - { name: config, mountPath: /config, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: config
+          configMap: { name: weather-locations }
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-backend   # fixed name: the frontend nginx proxies to it
+  labels: {{- include "weather.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  selector: {{- include "weather.selector" "backend" | nindent 4 }}
+  ports: [{ name: http, port: 8000, targetPort: http }]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: weather-backend
+spec:
+  minAvailable: 1   # node drains/upgrades never take all API pods at once
+  selector:
+    matchLabels: {{- include "weather.selector" "backend" | nindent 6 }}
+{{- if .Values.backend.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: weather-backend
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: weather-backend }
+  minReplicas: {{ .Values.backend.replicas }}
+  maxReplicas: {{ .Values.backend.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: {{ .Values.backend.autoscaling.targetCPU }} } }
+{{- end }}

@@ -1,0 +1,21 @@
+# EKS (infra/terraform). Designed, not deployed. Fill the ARNs/host from `terraform output`.
+images:
+  backend: <account>.dkr.ecr.eu-west-1.amazonaws.com/weather/backend@sha256:<digest>
+  frontend: <account>.dkr.ecr.eu-west-1.amazonaws.com/weather/frontend@sha256:<digest>
+backend: { replicas: 3 }
+frontend: { replicas: 3 }
+db:
+  host: <db_endpoint output>
+  sslMode: verify-full
+  sslRootCert: /app/rds-global-bundle.pem
+  auth: iam
+  awsRegion: eu-west-1
+  egressTo:
+    - ipBlock: { cidr: 10.20.100.0/22 }   # database subnets only
+ingress:
+  enabled: true
+  host: weather.example.com
+  certificateArn: <acm certificate arn>
+  wafAclArn: <waf_acl_arn output>
+monitoring:
+  enabled: true

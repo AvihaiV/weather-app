@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>World Weather</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="sky-cloudy-day">
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <h1 class="brand">World Weather</h1>
+        <button id="edit" class="edit-btn" aria-pressed="false">Edit</button>
+      </div>
+      <p class="hint" id="hint">Drag cities to reorder.</p>
+      <div id="cities" role="list" aria-label="Cities"></div>
+      <p id="status" class="status" role="status">Loading…</p>
+    </aside>
+
+    <main id="main" hidden>
+      <section class="now" aria-live="polite">
+        <h2 id="city"></h2>
+        <div id="clock" class="now-clock"></div>
+        <div id="temp" class="big-temp"></div>
+        <div id="cond" class="now-cond"></div>
+        <div id="hl" class="now-hl"></div>
+      </section>
+
+      <article class="tile history">
+        <header class="tile-head">
+          <span>📈 Temperature history</span>
+          <div class="stats" id="stats"></div>
+          <div class="ranges" role="group" aria-label="Time range">
+            <button data-hours="24">24h</button>
+            <button data-hours="72">3d</button>
+            <button data-hours="168">7d</button>
+          </div>
+        </header>
+        <div id="chart"></div>
+      </article>
+
+      <section class="tiles">
+        <article class="tile">
+          <header class="tile-head"><span>💨 Wind</span></header>
+          <div class="wind">
+            <div>
+              <div class="tile-value" id="wind-speed"></div>
+              <div class="tile-note" id="wind-dir"></div>
+            </div>
+            <div id="compass" class="compass"></div>
+          </div>
+        </article>
+        <article class="tile">
+          <header class="tile-head"><span>🌡️ Feels like</span></header>
+          <div class="tile-value" id="feels"></div>
+          <div class="tile-note" id="feels-note"></div>
+        </article>
+        <article class="tile">
+          <header class="tile-head"><span>💧 Humidity</span></header>
+          <div class="tile-value" id="humidity"></div>
+          <div class="meter"><div id="humidity-bar"></div></div>
+          <div class="tile-note" id="humidity-note"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

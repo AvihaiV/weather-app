@@ -1,0 +1,97 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $iam := eq .Values.db.auth "iam" }}
+# Zero trust inside the namespace: everything is denied, then each flow below is allowed explicitly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+---
+# Frontend: the only pod reachable from outside the namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/component: frontend } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports: [{ port: 8080 }]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/component: backend } } }]
+      ports: [{ port: 8000 }]
+---
+# Backend: reachable only from the frontend and Prometheus; may only talk to the database.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/component: backend } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/component: frontend } }
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }} } }
+      ports: [{ port: 8000 }]
+  egress:
+    - to: {{- toYaml .Values.db.egressTo | nindent 8 }}
+      ports: [{ port: {{ .Values.db.port }} }]
+    {{- if $iam }}
+    - to: [{ ipBlock: { cidr: 169.254.170.23/32 } }]   # EKS Pod Identity agent (credentials for the IAM DB token)
+      ports: [{ port: 80 }]
+    {{- end }}
+---
+# Migrate: database only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: migrate
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/component: migrate } }
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to: {{- toYaml .Values.db.egressTo | nindent 8 }}
+      ports: [{ port: {{ .Values.db.port }} }]
+    {{- if $iam }}
+    - to: [{ ipBlock: { cidr: 169.254.170.23/32 } }]
+      ports: [{ port: 80 }]
+    {{- end }}
+---
+# Collector: database + public internet on 443 (weather API). Private ranges and cloud metadata are excluded,
+# so a compromised collector cannot scan the VPC or reach the node's metadata service.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: collector
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/component: collector } }
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to: {{- toYaml .Values.db.egressTo | nindent 8 }}
+      ports: [{ port: {{ .Values.db.port }} }]
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]
+      ports: [{ port: 443 }]
+    {{- if $iam }}
+    - to: [{ ipBlock: { cidr: 169.254.170.23/32 } }]
+      ports: [{ port: 80 }]
+    {{- end }}
+{{- end }}

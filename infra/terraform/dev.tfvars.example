@@ -1,0 +1,5 @@
+# Copy to dev.tfvars (gitignored) and fill in.
+environment             = "dev"
+github_repo             = "your-org/weather-app"
+state_bucket_name       = "your-org-weather-tfstate"
+eks_public_access_cidrs = ["203.0.113.10/32"] # your office/VPN IP. GitHub-hosted runners: see docs/decisions.md

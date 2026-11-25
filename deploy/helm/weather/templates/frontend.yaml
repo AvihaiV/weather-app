@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-frontend
+  labels: {{- include "weather.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ .Values.frontend.replicas }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels: {{- include "weather.selector" "frontend" | nindent 6 }}
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  template:
+    metadata:
+      labels: {{- include "weather.labels" . | nindent 8 }}
+        app.kubernetes.io/component: frontend
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {{- include "weather.podSecurity" 101 | nindent 8 }}
+      {{- include "weather.spread" "frontend" | nindent 6 }}
+      containers:
+        - name: nginx
+          image: {{ .Values.images.frontend }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          ports: [{ name: http, containerPort: 8080 }]
+          securityContext: {{- include "weather.containerSecurity" . | nindent 12 }}
+          resources: {{- toYaml .Values.frontend.resources | nindent 12 }}
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }   # nginx pid + temp files; root filesystem stays read-only
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 32Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-frontend
+  labels: {{- include "weather.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  type: {{ .Values.frontend.service.type }}
+  selector: {{- include "weather.selector" "frontend" | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      {{- with .Values.frontend.service.nodePort }}
+      nodePort: {{ . }}
+      {{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: weather-frontend
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {{- include "weather.selector" "frontend" | nindent 6 }}
+{{- if .Values.frontend.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: weather-frontend
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: weather-frontend }
+  minReplicas: {{ .Values.frontend.replicas }}
+  maxReplicas: {{ .Values.frontend.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: {{ .Values.frontend.autoscaling.targetCPU }} } }
+{{- end }}
