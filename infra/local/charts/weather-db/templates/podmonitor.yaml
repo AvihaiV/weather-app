@@ -1,0 +1,13 @@
+{{- if .Values.monitoring }}
+# Prometheus scrapes each Postgres instance's built-in exporter (port "metrics", 9187).
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: weather-db
+spec:
+  selector:
+    matchLabels: { cnpg.io/cluster: weather-db }
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 30s
+{{- end }}

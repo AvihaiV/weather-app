@@ -1,0 +1,425 @@
+{
+ "uid": "weather-pipeline",
+ "title": "Weather \u00b7 Data pipeline",
+ "description": "Is fresh weather data arriving? Collector CronJob health",
+ "tags": [
+  "weather"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "30s",
+ "time": {
+  "from": "now-3h",
+  "to": "now"
+ },
+ "editable": true,
+ "panels": [
+  {
+   "type": "row",
+   "title": "Freshness",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 1
+   },
+   "panels": [],
+   "id": 1
+  },
+  {
+   "type": "stat",
+   "title": "Minutes since last successful collection",
+   "description": "Collector runs every 15 min. Above 60 min the WeatherDataStale alert fires.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "(time() - kube_cronjob_status_last_successful_time{namespace=\"weather\",cronjob=\"weather-collector\"}) / 60",
+     "legendFormat": "",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 1,
+    "w": 8,
+    "h": 5
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "m",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 20
+       },
+       {
+        "color": "red",
+        "value": 60
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "graphMode": "area",
+    "textMode": "auto"
+   },
+   "id": 2
+  },
+  {
+   "type": "stat",
+   "title": "Next scheduled run in",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "(kube_cronjob_next_schedule_time{namespace=\"weather\",cronjob=\"weather-collector\"} - time()) / 60",
+     "legendFormat": "",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 8,
+    "y": 1,
+    "w": 8,
+    "h": 5
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "m",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "graphMode": "area",
+    "textMode": "auto"
+   },
+   "id": 3
+  },
+  {
+   "type": "stat",
+   "title": "Failed collector jobs (kept history)",
+   "description": "Failed runs still retained by Kubernetes (failedJobsHistoryLimit=3)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(kube_job_status_failed{namespace=\"weather\",job_name=~\"weather-collector-.*|collect-.*\"}) or vector(0)",
+     "legendFormat": "",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 16,
+    "y": 1,
+    "w": 8,
+    "h": 5
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 1
+       },
+       {
+        "color": "red",
+        "value": 2
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "graphMode": "area",
+    "textMode": "auto"
+   },
+   "id": 4
+  },
+  {
+   "type": "row",
+   "title": "Runs",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 6,
+    "w": 24,
+    "h": 1
+   },
+   "panels": [],
+   "id": 5
+  },
+  {
+   "type": "timeseries",
+   "title": "Job duration",
+   "description": "How long each collector run took (activeDeadlineSeconds = 120)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "kube_job_status_completion_time{namespace=\"weather\",job_name=~\"weather-collector-.*|collect-.*\"} - kube_job_status_start_time{namespace=\"weather\",job_name=~\"weather-collector-.*|collect-.*\"}",
+     "legendFormat": "{{job_name}}",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 7,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "drawStyle": "points",
+      "pointSize": 8
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "id": 6
+  },
+  {
+   "type": "table",
+   "title": "Recent collector jobs",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "kube_job_status_succeeded{namespace=\"weather\",job_name=~\"weather-collector-.*|collect-.*\"}",
+     "legendFormat": "",
+     "refId": "A",
+     "format": "table",
+     "instant": true
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "kube_job_status_failed{namespace=\"weather\",job_name=~\"weather-collector-.*|collect-.*\"}",
+     "legendFormat": "",
+     "refId": "B",
+     "format": "table",
+     "instant": true
+    }
+   ],
+   "gridPos": {
+    "x": 12,
+    "y": 7,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {},
+   "transformations": [
+    {
+     "id": "merge",
+     "options": {}
+    },
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time": true,
+       "__name__": true,
+       "container": true,
+       "endpoint": true,
+       "instance": true,
+       "job": true,
+       "namespace": true,
+       "pod": true,
+       "service": true
+      },
+      "renameByName": {
+       "job_name": "Job",
+       "Value #A": "Succeeded",
+       "Value #B": "Failed"
+      }
+     }
+    }
+   ],
+   "id": 7
+  },
+  {
+   "type": "row",
+   "title": "Alerts",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 15,
+    "w": 24,
+    "h": 1
+   },
+   "panels": [],
+   "id": 8
+  },
+  {
+   "type": "alertlist",
+   "title": "Firing weather alerts",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [],
+   "gridPos": {
+    "x": 0,
+    "y": 16,
+    "w": 24,
+    "h": 6
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "showOptions": "current",
+    "maxItems": 10,
+    "sortOrder": 1,
+    "stateFilter": {
+     "firing": true,
+     "pending": true
+    },
+    "alertName": "Weather",
+    "dashboardAlerts": false,
+    "alertInstanceLabelFilter": "",
+    "datasource": "Prometheus"
+   },
+   "id": 9
+  }
+ ],
+ "templating": {
+  "list": []
+ },
+ "annotations": {
+  "list": []
+ }
+}

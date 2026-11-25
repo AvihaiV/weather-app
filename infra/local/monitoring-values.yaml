@@ -23,6 +23,11 @@ grafana:
     limits: { memory: 512Mi }
   livenessProbe:
     initialDelaySeconds: 180
+  sidecar:
+    dashboards:
+      # Dashboards come from ConfigMaps (label grafana_dashboard=1); this annotation picks the folder.
+      folderAnnotation: grafana_folder
+      provider: { foldersFromFilesStructure: true }
 # kind binds these control-plane components to localhost: scraping them only produces false alerts.
 kubeEtcd: { enabled: false }
 kubeControllerManager: { enabled: false }

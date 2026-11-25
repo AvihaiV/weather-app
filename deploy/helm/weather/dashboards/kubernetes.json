@@ -1,0 +1,440 @@
+{
+ "uid": "weather-k8s",
+ "title": "Weather \u00b7 Kubernetes resources",
+ "description": "Pods, CPU/memory vs limits, autoscaling, restarts",
+ "tags": [
+  "weather"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "30s",
+ "time": {
+  "from": "now-3h",
+  "to": "now"
+ },
+ "editable": true,
+ "panels": [
+  {
+   "type": "row",
+   "title": "Capacity",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 1
+   },
+   "panels": [],
+   "id": 1
+  },
+  {
+   "type": "timeseries",
+   "title": "CPU by pod",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"weather\",container!=\"\",container!=\"POD\"}[5m]))",
+     "legendFormat": "{{pod}}",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 1,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "cores",
+     "color": {
+      "mode": "palette-classic"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "showPoints": "never",
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "id": 2
+  },
+  {
+   "type": "timeseries",
+   "title": "Memory by pod",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"weather\",container!=\"\",container!=\"POD\"})",
+     "legendFormat": "{{pod}}",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 12,
+    "y": 1,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes",
+     "color": {
+      "mode": "palette-classic"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "showPoints": "never",
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "id": 3
+  },
+  {
+   "type": "bargauge",
+   "title": "Memory used vs limit",
+   "description": "At 100% the container is OOM-killed",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "100 * sum by (pod) (container_memory_working_set_bytes{namespace=\"weather\",container!=\"\",container!=\"POD\"}) / sum by (pod) (kube_pod_container_resource_limits{namespace=\"weather\",resource=\"memory\"})",
+     "legendFormat": "{{pod}}",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 9,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 70
+       },
+       {
+        "color": "red",
+        "value": 90
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "orientation": "horizontal",
+    "displayMode": "gradient",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "minVizHeight": 10
+   },
+   "id": 4
+  },
+  {
+   "type": "timeseries",
+   "title": "Autoscaler: current vs desired replicas",
+   "description": "HPA targets 70% CPU, min 2 / max 6",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"weather\"}",
+     "legendFormat": "{{horizontalpodautoscaler}} current",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"weather\"}",
+     "legendFormat": "{{horizontalpodautoscaler}} desired",
+     "refId": "B"
+    }
+   ],
+   "gridPos": {
+    "x": 12,
+    "y": 9,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "color": {
+      "mode": "palette-classic"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "showPoints": "never",
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "id": 5
+  },
+  {
+   "type": "row",
+   "title": "Stability & placement",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 17,
+    "w": 24,
+    "h": 1
+   },
+   "panels": [],
+   "id": 6
+  },
+  {
+   "type": "timeseries",
+   "title": "Container restarts (last 1h)",
+   "description": "Restarts usually mean crashes or failed liveness probes",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"weather\"}[1h]))",
+     "legendFormat": "{{pod}}",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 18,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "color": {
+      "mode": "palette-classic"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "showPoints": "never",
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "id": 7
+  },
+  {
+   "type": "table",
+   "title": "Pods per node",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "kube_pod_info{namespace=\"weather\"}",
+     "legendFormat": "",
+     "refId": "A",
+     "format": "table",
+     "instant": true
+    }
+   ],
+   "gridPos": {
+    "x": 12,
+    "y": 18,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {},
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "indexByName": {
+       "pod": 0,
+       "node": 1
+      },
+      "excludeByName": {
+       "Time": true,
+       "Value": true,
+       "__name__": true,
+       "container": true,
+       "created_by_kind": true,
+       "created_by_name": true,
+       "endpoint": true,
+       "host_ip": true,
+       "host_network": true,
+       "instance": true,
+       "job": true,
+       "namespace": true,
+       "pod_ip": true,
+       "priority_class": true,
+       "service": true,
+       "uid": true
+      }
+     }
+    }
+   ],
+   "id": 8
+  }
+ ],
+ "templating": {
+  "list": []
+ },
+ "annotations": {
+  "list": []
+ }
+}

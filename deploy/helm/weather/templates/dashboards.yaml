@@ -1,0 +1,19 @@
+{{- if .Values.monitoring.enabled }}
+# Grafana dashboards as code: the Grafana sidecar loads every ConfigMap labelled grafana_dashboard=1.
+# Edit the JSON in dashboards/ (or export from Grafana UI and replace the file), commit, deploy.
+{{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: weather-dashboard-{{ base $path | trimSuffix ".json" }}
+  labels:
+    {{- include "weather.labels" $ | nindent 4 }}
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Weather
+data:
+  {{ base $path }}: |-
+    {{- $.Files.Get $path | nindent 4 }}
+{{- end }}
+{{- end }}

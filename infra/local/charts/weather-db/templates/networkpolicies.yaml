@@ -27,3 +27,6 @@ spec:
     - from:
         - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: cnpg-system } }
       ports: [{ port: 5432 }, { port: 8000 }]
+    - from:   # Prometheus may scrape the Postgres exporter, nothing else
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+      ports: [{ port: 9187 }]

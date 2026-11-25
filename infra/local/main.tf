@@ -149,6 +149,14 @@ resource "kubernetes_secret_v1" "app_db" {
 }
 
 # ---------------- Platform ----------------
+# The Helm provider only diffs chart version + values, not files inside a local chart.
+# Hashing every file makes any template/dashboard edit trigger an upgrade.
+locals {
+  app_chart      = "${path.module}/../../deploy/helm/weather"
+  db_chart       = "${path.module}/charts/weather-db"
+  app_chart_hash = sha1(join("", [for f in sort(fileset(local.app_chart, "**")) : filesha1("${local.app_chart}/${f}")]))
+  db_chart_hash  = sha1(join("", [for f in sort(fileset(local.db_chart, "**")) : filesha1("${local.db_chart}/${f}")]))
+}
 resource "helm_release" "metrics_server" {
   name       = "metrics-server"
   repository = "https://kubernetes-sigs.github.io/metrics-server/"
@@ -186,11 +194,15 @@ resource "helm_release" "monitoring" {
 }
 
 resource "helm_release" "db" {
-  name       = "weather-db"
-  chart      = "${path.module}/charts/weather-db"
-  namespace  = kubernetes_namespace_v1.this["weather-db"].metadata[0].name
-  set        = [{ name = "instances", value = tostring(var.db_instances) }]
-  depends_on = [helm_release.cnpg, kubernetes_secret_v1.db_role]
+  name      = "weather-db"
+  chart     = "${path.module}/charts/weather-db"
+  namespace = kubernetes_namespace_v1.this["weather-db"].metadata[0].name
+  set = [
+    { name = "instances", value = tostring(var.db_instances) },
+    { name = "monitoring", value = tostring(var.monitoring_enabled) },
+    { name = "chartHash", value = local.db_chart_hash },
+  ]
+  depends_on = [helm_release.cnpg, kubernetes_secret_v1.db_role, helm_release.monitoring]
 }
 
 # Wait until the database actually accepts connections before deploying the app.
@@ -203,13 +215,14 @@ resource "terraform_data" "db_ready" {
 
 resource "helm_release" "app" {
   name      = "weather"
-  chart     = "${path.module}/../../deploy/helm/weather"
+  chart     = local.app_chart
   namespace = kubernetes_namespace_v1.this["weather"].metadata[0].name
   values    = [file("${path.module}/../../deploy/helm/weather/values-local.yaml")]
   set = [
     { name = "images.backend", value = var.images.backend },
     { name = "images.frontend", value = var.images.frontend },
     { name = "monitoring.enabled", value = tostring(var.monitoring_enabled) },
+    { name = "chartHash", value = local.app_chart_hash },
   ]
   atomic     = true # failed upgrade (e.g. migration error) rolls back automatically
   timeout    = 300
