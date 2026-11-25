@@ -1,0 +1,5 @@
+apiVersion: v2
+name: weather-db
+description: Local PostgreSQL (CloudNativePG) standing in for RDS
+type: application
+version: 0.1.0

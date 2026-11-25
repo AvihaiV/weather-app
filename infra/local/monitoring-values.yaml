@@ -1,0 +1,30 @@
+# kube-prometheus-stack sized for a laptop / CI runner.
+nodeExporter:
+  enabled: false        # needs hostNetwork/hostPID (privileged); node metrics are not needed for this demo
+prometheus:
+  prometheusSpec:
+    retention: 1d
+    # Pick up ServiceMonitors / rules from any namespace (our app's live in "weather").
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { memory: 768Mi }
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { memory: 128Mi }
+grafana:
+  # Grafana 13 runs storage migrations on first start; 256Mi starved it into a liveness-kill loop.
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { memory: 512Mi }
+  livenessProbe:
+    initialDelaySeconds: 180
+# kind binds these control-plane components to localhost: scraping them only produces false alerts.
+kubeEtcd: { enabled: false }
+kubeControllerManager: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeProxy: { enabled: false }

@@ -1,0 +1,4 @@
+instances: 3          # 1 primary + 2 streaming replicas; the operator fails over automatically
+imageName: ghcr.io/cloudnative-pg/postgresql:17   # same major version as RDS
+storage: 1Gi
+appNamespace: weather

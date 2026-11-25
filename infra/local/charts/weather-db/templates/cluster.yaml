@@ -1,0 +1,31 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: weather-db
+spec:
+  instances: {{ .Values.instances }}
+  imageName: {{ .Values.imageName }}
+  primaryUpdateStrategy: unsupervised
+  storage:
+    size: {{ .Values.storage }}
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 384Mi }
+  affinity:
+    enablePodAntiAffinity: true        # spread instances across nodes
+    topologyKey: kubernetes.io/hostname
+  bootstrap:
+    initdb:
+      database: weather
+      owner: weather_migrate           # schema owner = the migrate job's user, not the app
+      secret: { name: weather-migrate-db }
+  managed:
+    roles:                             # least-privilege login roles; table grants come from schema.sql
+      - name: weather_api
+        ensure: present
+        login: true
+        passwordSecret: { name: weather-api-db }
+      - name: weather_collector
+        ensure: present
+        login: true
+        passwordSecret: { name: weather-collector-db }

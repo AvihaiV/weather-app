@@ -47,7 +47,6 @@ Status labels: **deployed** (runs in CI / locally), **designed** (written + stat
 - **Chosen:** one Helm chart, two environments.
   - `infra/local`: Terraform builds a kind cluster, CloudNativePG (3-instance Postgres with automatic failover), Prometheus/Grafana, metrics-server, and the app. Used on a laptop and in CI.
   - `infra/terraform`: the AWS production design (VPC, EKS, RDS, ECR, WAF, OIDC, Pod Identity). Validated, Checkov-scanned and unit-tested with a mocked provider, but **not applied**.
-- **Alternatives rejected:** free cloud tiers (credit card, sign-up, a different Terraform than the AWS design); a self-hosted runner on a laptop (fork PRs on a public repo could run code on it).
 - **No ingress-nginx:** retirement was announced in November 2025 (maintenance ended March 2026), so we don't put an unmaintained component on the public path. Local uses a NodePort mapped to `127.0.0.1`; AWS uses the ALB (Load Balancer Controller) + WAF.
 
 ## D8. AWS network & cluster

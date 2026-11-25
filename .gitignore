@@ -12,3 +12,6 @@ backend.hcl
 .terraform.lock.hcl.bak
 .external_modules/
 .idea/
+# kind kubeconfig (contains cluster admin private key)
+*-config
+*.kubeconfig

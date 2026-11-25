@@ -19,3 +19,14 @@ ALTER TABLE weather_observations
     ADD COLUMN IF NOT EXISTS wind_direction_deg     smallint,
     ADD COLUMN IF NOT EXISTS is_day                 boolean,
     ADD COLUMN IF NOT EXISTS utc_offset_seconds     integer;
+
+-- Least privilege: grant only if the role exists (it does in K8s/AWS; local docker compose uses one user).
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'weather_api') THEN
+        GRANT SELECT ON weather_observations TO weather_api;                         -- read-only API
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'weather_collector') THEN
+        GRANT SELECT, INSERT, DELETE ON weather_observations TO weather_collector;   -- write + retention cleanup
+    END IF;
+END $$;
