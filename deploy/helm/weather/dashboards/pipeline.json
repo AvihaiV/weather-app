@@ -160,7 +160,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "sum(kube_job_status_failed{namespace=\"weather\",job_name=~\"weather-collector-.*|collect-.*\"}) or vector(0)",
+     "expr": "sum(kube_job_status_failed{namespace=\"weather\",job_name=~\"weather-collector-.*\"}) or vector(0)",
      "legendFormat": "",
      "refId": "A"
     }
@@ -236,7 +236,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "kube_job_status_completion_time{namespace=\"weather\",job_name=~\"weather-collector-.*|collect-.*\"} - kube_job_status_start_time{namespace=\"weather\",job_name=~\"weather-collector-.*|collect-.*\"}",
+     "expr": "kube_job_status_completion_time{namespace=\"weather\",job_name=~\"weather-collector-.*\"} - kube_job_status_start_time{namespace=\"weather\",job_name=~\"weather-collector-.*\"}",
      "legendFormat": "{{job_name}}",
      "refId": "A"
     }
@@ -271,7 +271,7 @@
   {
    "type": "table",
    "title": "Recent collector jobs",
-   "description": "",
+   "description": "One row per run. Scheduled runs: weather-collector-<n>; manual runs: weather-collector-manual-<time>. Kubernetes keeps the last 3 of each outcome.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
@@ -282,7 +282,7 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "kube_job_status_succeeded{namespace=\"weather\",job_name=~\"weather-collector-.*|collect-.*\"}",
+     "expr": "sum by (job_name) (kube_job_status_start_time{namespace=\"weather\",job_name=~\"weather-collector-.*\"}) * 1000",
      "legendFormat": "",
      "refId": "A",
      "format": "table",
@@ -293,9 +293,20 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "expr": "kube_job_status_failed{namespace=\"weather\",job_name=~\"weather-collector-.*|collect-.*\"}",
+     "expr": "sum by (job_name) (kube_job_status_succeeded{namespace=\"weather\",job_name=~\"weather-collector-.*\"})",
      "legendFormat": "",
      "refId": "B",
+     "format": "table",
+     "instant": true
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (job_name) (kube_job_status_failed{namespace=\"weather\",job_name=~\"weather-collector-.*\"})",
+     "legendFormat": "",
+     "refId": "C",
      "format": "table",
      "instant": true
     }
@@ -308,47 +319,94 @@
    },
    "fieldConfig": {
     "defaults": {
-     "unit": "short",
-     "color": {
-      "mode": "thresholds"
-     },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
+     "unit": "short"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Started"
+      },
+      "properties": [
        {
-        "color": "green",
-        "value": null
+        "id": "unit",
+        "value": "dateTimeAsIso"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Failed"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-background"
+        }
+       },
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "transparent",
+           "value": null
+          },
+          {
+           "color": "red",
+           "value": 1
+          }
+         ]
+        }
        }
       ]
      }
-    },
-    "overrides": []
+    ]
    },
    "options": {},
    "transformations": [
     {
-     "id": "merge",
-     "options": {}
+     "id": "joinByField",
+     "options": {
+      "byField": "job_name",
+      "mode": "outer"
+     }
     },
     {
      "id": "organize",
      "options": {
       "excludeByName": {
        "Time": true,
-       "__name__": true,
-       "container": true,
-       "endpoint": true,
-       "instance": true,
-       "job": true,
-       "namespace": true,
-       "pod": true,
-       "service": true
+       "Time 1": true,
+       "Time 2": true,
+       "Time 3": true
+      },
+      "indexByName": {
+       "Value #A": 0,
+       "job_name": 1,
+       "Value #B": 2,
+       "Value #C": 3
       },
       "renameByName": {
        "job_name": "Job",
-       "Value #A": "Succeeded",
-       "Value #B": "Failed"
+       "Value #A": "Started",
+       "Value #B": "Succeeded",
+       "Value #C": "Failed"
       }
+     }
+    },
+    {
+     "id": "sortBy",
+     "options": {
+      "sort": [
+       {
+        "field": "Started",
+        "desc": true
+       }
+      ]
      }
     }
    ],

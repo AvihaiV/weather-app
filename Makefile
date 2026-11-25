@@ -25,7 +25,7 @@ local-up: images ## Create kind cluster + platform + app (UI on http://127.0.0.1
 	$(MAKE) local-collect
 
 local-collect: ## Run the collector once now instead of waiting for the schedule
-	kubectl -n weather create job --from=cronjob/weather-collector collect-$(shell date +%s)
+	kubectl -n weather create job --from=cronjob/weather-collector weather-collector-manual-$(shell date +%s)
 
 local-down: ## Destroy the local cluster and everything in it
 	kind delete cluster --name weather
