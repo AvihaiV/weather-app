@@ -165,9 +165,9 @@ jobs:
         with:
           context: app/${{ matrix.component }}
           push: true
-          tags: |
-            ${{ steps.img.outputs.name }}:sha-${{ github.sha }}
-            ${{ steps.img.outputs.name }}:main
+          # Only the immutable per-commit tag. No moving "main"/"latest" tag: deployments pick a
+          # commit whose whole pipeline passed (see demo.yml), never "whatever was pushed last".
+          tags: ${{ steps.img.outputs.name }}:sha-${{ github.sha }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha,scope=${{ matrix.component }}
       - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4

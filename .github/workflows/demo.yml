@@ -13,6 +13,7 @@ on:
 permissions:
   contents: read
   packages: read
+  actions: read   # to find the latest fully green CI run
 
 concurrency:
   group: demo
@@ -29,12 +30,28 @@ jobs:
           if ! [[ "$MINUTES" =~ ^[0-9]+$ ]] || (( MINUTES < 1 || MINUTES > 120 )); then
             echo "minutes must be 1-120"; exit 1
           fi
+      # Promotion, not "latest": deploy only a commit whose WHOLE CI run passed (tests, scans, build,
+      # signing, deploy + smoke tests). Code (Terraform/chart/scripts) and images come from that one commit.
+      - name: Pick the latest fully green commit on main
+        id: green
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          sha=$(gh run list --repo "$REPO" --workflow ci.yml --branch main --event push --status success \
+                --limit 1 --json headSha --jq '.[0].headSha')
+          [ -n "$sha" ] || { echo "no green CI run on main"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Deploying verified commit $sha (latest green CI on main)"
+          echo "::notice title=Deployed commit::$sha (latest fully green CI run on main)"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { persist-credentials: false }
+        with:
+          ref: ${{ steps.green.outputs.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/verified-images
         id: img
         with:
-          tag: main
+          tag: sha-${{ steps.green.outputs.sha }}
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: ./.github/actions/kind-deploy
         with:
