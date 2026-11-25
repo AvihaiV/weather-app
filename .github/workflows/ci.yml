@@ -10,9 +10,14 @@ on:
 permissions:
   contents: read
 
+# Newest commit wins: a new push cancels the older run on the same branch (running or queued).
+# Safe because this pipeline's deploy target is an ephemeral kind cluster inside the runner, and a
+# cancelled run is never "green", so the demo's promotion step can't pick it.
+# A future deploy to a PERSISTENT environment (e.g. deploy-aws) must use its own job-level
+# concurrency group with cancel-in-progress: false: never interrupt a real apply halfway.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}   # never cancel a running main deploy
+  cancel-in-progress: true
 
 jobs:
   test:
