@@ -96,6 +96,19 @@ main { height: 100vh; overflow-y: auto; padding: 24px 28px; max-width: 1000px; w
 .stop-top { stop-color: #fff; stop-opacity: 0.4; }
 .stop-bottom { stop-color: #fff; stop-opacity: 0; }
 .dot { fill: #fff; }
+#chart { position: relative; }
+.hit { fill: transparent; cursor: crosshair; touch-action: none; }
+.guide { stroke: rgba(255, 255, 255, 0.6); stroke-width: 1; stroke-dasharray: 3 3; }
+.focus { fill: #fff; stroke: rgba(0, 0, 0, 0.35); stroke-width: 2; }
+.tip {
+  position: absolute; transform: translate(12px, -50%); pointer-events: none; z-index: 2;
+  display: flex; flex-direction: column; gap: 2px; min-width: 120px; padding: 8px 10px; border-radius: 10px;
+  background: rgba(10, 16, 32, 0.85); border: 1px solid var(--line); backdrop-filter: blur(8px);
+  font-size: 0.85rem; white-space: nowrap;
+}
+.tip.flip { transform: translate(calc(-100% - 12px), -50%); }
+.tip strong { font-size: 1.1rem; }
+.tip small { color: var(--muted); }
 
 .wind { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .compass { width: 84px; flex: none; }
