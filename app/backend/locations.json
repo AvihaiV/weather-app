@@ -1,8 +1,8 @@
 [
   {"name": "Tel Aviv", "lat": 32.0853, "lon": 34.7818},
   {"name": "London", "lat": 51.5074, "lon": -0.1278},
+  {"name": "Sao Paulo", "lat": -23.5505, "lon": -46.6333},
   {"name": "New York", "lat": 40.7128, "lon": -74.006},
   {"name": "Tokyo", "lat": 35.6762, "lon": 139.6503},
-  {"name": "Sydney", "lat": -33.8688, "lon": 151.2093},
-  {"name": "Sao Paulo", "lat": -23.5505, "lon": -46.6333}
+  {"name": "Sydney", "lat": -33.8688, "lon": 151.2093}
 ]

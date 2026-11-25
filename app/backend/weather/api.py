@@ -52,10 +52,13 @@ def metrics_endpoint():
 @app.get("/api/weather/current")
 def current():
     try:
-        return db.latest()
+        rows = db.latest()
     except Exception:
         log.exception("query failed")
         raise HTTPException(503, "temporarily unavailable")
+    # Configured order is the default display order (the UI opens on the first city).
+    rank = {l.name: i for i, l in enumerate(load_locations())}
+    return sorted(rows, key=lambda r: rank.get(r["location"], len(rank)))
 
 
 @app.get("/api/weather/history")

@@ -22,6 +22,12 @@ def test_current(monkeypatch):
     assert r.json()[0]["location"] == "London"
 
 
+def test_current_uses_configured_order(monkeypatch):
+    rows = [dict(ROW, location=n) for n in ("Sydney", "London", "Tel Aviv")]
+    monkeypatch.setattr(api.db, "latest", lambda: rows)
+    assert [r["location"] for r in client.get("/api/weather/current").json()] == ["Tel Aviv", "London", "Sydney"]
+
+
 def test_history_known_location(monkeypatch):
     seen = {}
     monkeypatch.setattr(api.db, "history", lambda loc, hours: seen.update(loc=loc, hours=hours) or [])
